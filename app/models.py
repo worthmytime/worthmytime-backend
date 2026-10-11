@@ -179,6 +179,19 @@ class RecurringExpense(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ExpenseTemplate(Base):
+    """Szablon szybkiego wydatku (np. kawa): jedno wywołanie dopisuje wpis do rejestru."""
+
+    __tablename__ = "expense_templates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    category: Mapped[str] = mapped_column(String(10))
+    amount: Mapped[float] = mapped_column(Money)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class WishlistItem(Base):
     """Rzecz, którą użytkownik chce kupić, z okresem ostygnięcia na przemyślenie decyzji."""
 
