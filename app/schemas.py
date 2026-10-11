@@ -161,6 +161,16 @@ class RecurringIn(BaseModel):
     start_date: date | None = None  # domyślnie dziś; wcześniejsza data dopisze zaległe wpisy
 
 
+class ExpenseTemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    category: Category
+    amount: MoneyIn = Field(gt=0, le=1_000_000_000)
+
+
+class ExpenseTemplateUseIn(BaseModel):
+    spent_on: date | None = None  # domyślnie dziś
+
+
 class LoanPaymentIn(BaseModel):
     paid_on: date | None = None  # domyślnie dziś
 

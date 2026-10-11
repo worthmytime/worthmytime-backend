@@ -24,7 +24,7 @@ TAGS = [
     ("Kalkulator", "Przeliczanie ceny na czas pracy (bez konta) oraz porównania."),
     ("Historia", "Zapisane obliczenia, udostępnianie i podsumowanie."),
     ("Profil i budżet", "Stawka, plan budżetu, kredyty, prognoza i alerty."),
-    ("Wydatki", "Rejestr wydatków i stałe wydatki."),
+    ("Wydatki", "Rejestr wydatków, stałe wydatki i szablony szybkich wpisów."),
     ("Życzenia i cele", "Lista życzeń z okresem ostygnięcia oraz cele oszczędnościowe."),
 ]
 
@@ -219,6 +219,11 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
         ["id", "name", "category", "amount", "day_of_month", "active"],
     ),
     "RecurringExpenseList": _list_of("RecurringExpense", monthly_total=_num),
+    "ExpenseTemplate": _obj(
+        {"id": _str, "name": _str, "category": {"enum": ["NEEDS", "FUTURE", "GOALS", "FUN"]}, "amount": _num},
+        ["id", "name", "category", "amount"],
+    ),
+    "ExpenseTemplateList": _list_of("ExpenseTemplate"),
     "Wish": _obj(
         {
             "id": _str,
@@ -417,6 +422,16 @@ OPERATIONS: list[dict] = [
         (200, "Szablon", "RecurringExpense"), body=s.RecurringIn),
     _op("DELETE", "/recurring-expenses/{template_id}", "delete_recurring", "Wydatki", "Usunięcie stałego wydatku",
         (200, "Usunięto", "Deleted"), description="Wpisy już dopisane do rejestru zostają."),
+    _op("GET", "/expense-templates", "list_expense_templates", "Wydatki", "Szablony szybkich wydatków",
+        (200, "Szablony w kolejności dodania", "ExpenseTemplateList")),
+    _op("POST", "/expense-templates", "add_expense_template", "Wydatki", "Dodanie szablonu wydatku",
+        (201, "Szablon", "ExpenseTemplate"), body=s.ExpenseTemplateIn, extra={409: "Osiągnięto limit 20 szablonów"}),
+    _op("DELETE", "/expense-templates/{template_id}", "delete_expense_template", "Wydatki", "Usunięcie szablonu wydatku",
+        (200, "Usunięto", "Deleted"), description="Wpisy już dopisane do rejestru zostają."),
+    _op("POST", "/expense-templates/{template_id}/use", "use_expense_template", "Wydatki", "Dopisanie wydatku z szablonu",
+        (201, "Wpis", "Expense"), body=s.ExpenseTemplateUseIn,
+        description="Tworzy zwykły wpis w rejestrze (kategoria i kwota z szablonu, nazwa jako notatka). "
+        "Ten sam szablon można użyć wiele razy tego samego dnia."),
     # Życzenia i cele
     _op("GET", "/wishlist", "get_wishlist", "Życzenia i cele", "Lista życzeń", (200, "Pozycje i statystyki", "WishList")),
     _op("POST", "/wishlist", "add_wish", "Życzenia i cele", "Dodanie do listy życzeń", (201, "Pozycja", "Wish"), body=s.WishIn),
