@@ -189,6 +189,25 @@ async def import_expenses(request: Request):
     return ok({"created": created, "skipped": len(data.items) - created}, 201 if created else 200)
 
 
+@bp.put("/expenses/<expense_id:str>")
+@login_required
+async def update_expense(request: Request, expense_id: str):
+    """Edycja wpisu (kategoria, kwota, notatka, data); źródło wpisu zostaje bez zmian."""
+    data = parse(ExpenseIn, request)
+    e = await _own(request, Expense, expense_id, request.ctx.user, "wydatku")
+    if e.source_type == "LOAN":
+        raise ApiError("Wpisu raty kredytu nie edytuje się: usuń go i oznacz ratę ponownie", 409)
+    e.category, e.amount, e.note = data.category.value, data.amount, data.note
+    if data.spent_on:  # brak daty w żądaniu zostawia dotychczasową
+        e.spent_on = data.spent_on
+    try:
+        await request.ctx.db.commit()
+    except IntegrityError:  # to samo źródło ma już wpis z tą datą (np. stały wydatek)
+        await request.ctx.db.rollback()
+        raise ApiError("Ten wpis ma już odpowiednik z tą datą", 409)
+    return ok(_expense(e))
+
+
 @bp.delete("/expenses/<expense_id:str>")
 @login_required
 async def delete_expense(request: Request, expense_id: str):

@@ -398,6 +398,10 @@ OPERATIONS: list[dict] = [
         query=[_q("month", "Miesiąc `YYYY-MM` (domyślnie bieżący)")],
         description="Przy odczycie dopisują się brakujące wpisy ze stałych wydatków."),
     _op("POST", "/expenses", "add_expense", "Wydatki", "Dopisanie wydatku", (201, "Wpis", "Expense"), body=s.ExpenseIn),
+    _op("PUT", "/expenses/{expense_id}", "update_expense", "Wydatki", "Edycja wpisu", (200, "Wpis", "Expense"), body=s.ExpenseIn,
+        description="Zmienia kategorię, kwotę, notatkę i datę (brak `spent_on` zostawia dotychczasową); źródło wpisu się nie zmienia. "
+        "Wpisu raty kredytu (`source_type=LOAN`) nie można edytować.",
+        extra={409: "Wpis raty kredytu albo data zajęta przez ten sam stały wydatek"}),
     _op("DELETE", "/expenses/{expense_id}", "delete_expense", "Wydatki", "Usunięcie wpisu", (200, "Usunięto", "Deleted")),
     _op("POST", "/expenses/import", "import_expenses", "Wydatki", "Import wielu wydatków naraz (np. z wyciągu bankowego)",
         (201, "Wpisy dopisane (200, gdy wszystkie już istniały)", "ImportResult"), body=s.ExpenseImportIn,
