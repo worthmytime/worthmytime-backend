@@ -464,7 +464,8 @@ OPERATIONS: list[dict] = [
         (200, "Odpowiedzi i ich opis dla Jev", "LifeContext")),
     _op("PUT", "/profile/context", "put_life_context", "Profil i budżet", "Zapis wywiadu o sytuacji życiowej",
         (200, "Odpowiedzi i ich opis dla Jev", "LifeContext"), body=s.LifeContextIn,
-        description="Mieszkanie, transport, praca, sprzęt i pozostałe; każde pole jest opcjonalne. Odpowiedzi trafiają do Jev "
+        description="Mieszkanie, transport, praca, sprzęt, oszczędności, zwierzęta, zdrowie i rozwój oraz własne kategorie użytkownika "
+        "(`custom`: nazwa i opis, do 10); każde pole jest opcjonalne. Odpowiedzi trafiają do Jev "
         "jako kontekst przy propozycji kategorii (`POST /ai/categorize`) dla zalogowanego użytkownika."),
     _op("GET", "/budget", "get_budget", "Profil i budżet", "Plan budżetu z wykorzystaniem kategorii i kredytami",
         (200, "Budżet", "Budget")),

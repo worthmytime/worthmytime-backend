@@ -50,8 +50,19 @@ EMPLOYMENT = {
 }
 
 
+# pytania tak/nie z grupy "zdrowie i rozwój": klucz, zdanie dla "tak", zdanie dla "nie"
+YES_NO = [
+    ("regular_health_costs", "Ma stałe wydatki na leczenie lub leki.", "Nie ma stałych wydatków na leczenie."),
+    ("does_sport", "Regularnie uprawia sport lub chodzi na siłownię.", "Nie uprawia regularnie sportu."),
+    ("pays_for_education", "Płaci za naukę, studia lub kursy.", "Nie płaci za naukę ani kursy."),
+]
+
+
 def summary(context: dict | None) -> list[str]:
-    """Zdania opisujące użytkownika, w stałej kolejności grup: mieszkanie, transport, praca, sprzęt, pozostałe."""
+    """Zdania opisujące użytkownika, w stałej kolejności grup.
+
+    Grupy: mieszkanie, transport, praca, sprzęt, oszczędności, zwierzęta, zdrowie i rozwój, własne kategorie, dopisek.
+    """
     c = context or {}
     out: list[str] = []
 
@@ -83,10 +94,35 @@ def summary(context: dict | None) -> list[str]:
     if c.get("computer_age_years") is not None:
         out.append(f"Jego komputer ma {years(c['computer_age_years'])}.")
 
-    if c.get("has_emergency_fund") is not None:
-        out.append("Ma poduszkę finansową." if c["has_emergency_fund"] else "Nie ma jeszcze poduszki finansowej.")
-    if c.get("has_pets") is not None:
-        out.append("Ma zwierzęta domowe." if c["has_pets"] else "Nie ma zwierząt domowych.")
+    months = c.get("emergency_fund_months")
+    if c.get("has_emergency_fund") is False:
+        out.append("Nie ma jeszcze poduszki finansowej.")
+    elif months:
+        out.append(f"Ma poduszkę finansową na {months} mies. wydatków.")
+    elif c.get("has_emergency_fund"):
+        out.append("Ma poduszkę finansową.")
+    if c.get("saves_regularly") is not None:
+        out.append("Regularnie odkłada pieniądze." if c["saves_regularly"] else "Nie odkłada pieniędzy regularnie.")
+    if c.get("invests") is not None:
+        out.append("Inwestuje część oszczędności." if c["invests"] else "Nie inwestuje.")
+
+    pets = (c.get("pets_description") or "").strip()
+    if c.get("has_pets") is False:
+        out.append("Nie ma zwierząt domowych.")
+    elif pets:
+        out.append(f"Ma zwierzęta domowe: {pets}.")
+    elif c.get("has_pets"):
+        out.append("Ma zwierzęta domowe.")
+
+    for key, yes, no in YES_NO:
+        if c.get(key) is not None:
+            out.append(yes if c[key] else no)
+
+    # własne kategorie użytkownika: jego nazwa i opis, bez interpretacji
+    for item in c.get("custom") or []:
+        name, description = (item.get("name") or "").strip(), (item.get("description") or "").strip()
+        if name and description:
+            out.append(f"{name}: {description}")
     notes = (c.get("notes") or "").strip()
     if notes:
         out.append(f"Sam o sobie dodaje: {notes}")
