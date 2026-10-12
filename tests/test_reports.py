@@ -180,3 +180,35 @@ def test_export_is_private_and_validates_format(client):
     assert client.get(EXPORT, headers=other)[1].json["expenses"] == []
     assert client.get(f"{EXPORT}?format=xml", headers=auth)[1].status == 422
     assert client.get(EXPORT)[1].status == 401
+
+
+def test_export_date_range(client):
+    auth = _register(client, "rep6@b.pl")
+    for day in ("2026-08-31", "2026-09-01", "2026-09-30", "2026-10-01"):
+        _spend(client, auth, "FUN", 10, day, day)
+    client.put("/api/v1/profile", json=PROFILE, headers=auth)
+    client.post("/api/v1/wishlist", json={"name": "Monitor", "price": 1500}, headers=auth)  # utworzone dziś
+
+    _, res = client.get(f"{EXPORT}?from=2026-09-01&to=2026-09-30", headers=auth)
+    assert res.status == 200 and res.json["range"] == {"from": "2026-09-01", "to": "2026-09-30"}
+    assert [e["spent_on"] for e in res.json["expenses"]] == ["2026-09-01", "2026-09-30"]  # zakres domknięty
+    assert res.json["wishlist"] == []  # życzenie utworzone poza zakresem
+    assert "worthmytime-2026-09-01_2026-09-30.json" in res.headers["content-disposition"]
+
+    # sam początek albo sam koniec zakresu
+    _, res = client.get(f"{EXPORT}?from=2026-09-30", headers=auth)
+    assert [e["spent_on"] for e in res.json["expenses"]] == ["2026-09-30", "2026-10-01"]
+    assert [w["name"] for w in res.json["wishlist"]] == ["Monitor"]
+    _, res = client.get(f"{EXPORT}?to=2026-08-31&format=csv", headers=auth)
+    assert res.text.count("expense") == 1
+
+    # bez zakresu eksport obejmuje całość
+    _, res = client.get(EXPORT, headers=auth)
+    assert len(res.json["expenses"]) == 4 and res.json["range"] == {"from": None, "to": None}
+
+
+def test_export_range_validation(client):
+    auth = _register(client, "rep7@b.pl")
+    assert client.get(f"{EXPORT}?from=wczoraj", headers=auth)[1].status == 422
+    assert client.get(f"{EXPORT}?to=2026-02-30", headers=auth)[1].status == 422
+    assert client.get(f"{EXPORT}?from=2026-10-02&to=2026-10-01", headers=auth)[1].status == 422

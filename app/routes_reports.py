@@ -1,6 +1,6 @@
 """Podsumowanie miesiąca (GET /reports/month) i eksport danych użytkownika (GET /export)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 from sanic import Blueprint, Request
 from sanic.response import text
@@ -83,21 +83,54 @@ def _iso(value) -> str | None:
     return value.isoformat() if value else None
 
 
-async def _export_data(request: Request) -> dict:
+def _date_arg(request: Request, name: str) -> date | None:
+    raw = request.args.get(name)
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        raise ApiError(f"Parametr {name} ma format YYYY-MM-DD", 422)
+
+
+def _created_between(model, start: date | None, end: date | None) -> list:
+    """Warunki na datę utworzenia (zakres domknięty, dni liczone w UTC)."""
+    conditions = []
+    if start:
+        conditions.append(model.created_at >= datetime.combine(start, time.min, tzinfo=UTC))
+    if end:
+        conditions.append(model.created_at < datetime.combine(end + timedelta(days=1), time.min, tzinfo=UTC))
+    return conditions
+
+
+async def _export_data(request: Request, start: date | None = None, end: date | None = None) -> dict:
+    """Dane do eksportu; zakres dat dotyczy daty wydatku, a dla celów, życzeń i obliczeń daty utworzenia."""
     user, db = request.ctx.user, request.ctx.db
     await materialize_recurring(request, user)
+    spent = ([Expense.spent_on >= start] if start else []) + ([Expense.spent_on <= end] if end else [])
     expenses = await db.scalars(
-        select(Expense).where(Expense.user_id == user.id).order_by(Expense.spent_on, Expense.created_at, Expense.id)
+        select(Expense)
+        .where(Expense.user_id == user.id, *spent)
+        .order_by(Expense.spent_on, Expense.created_at, Expense.id)
     )
-    goals = await db.scalars(select(SavingsGoal).where(SavingsGoal.user_id == user.id).order_by(SavingsGoal.created_at))
+    goals = await db.scalars(
+        select(SavingsGoal)
+        .where(SavingsGoal.user_id == user.id, *_created_between(SavingsGoal, start, end))
+        .order_by(SavingsGoal.created_at)
+    )
     wishes = await db.scalars(
-        select(WishlistItem).where(WishlistItem.user_id == user.id).order_by(WishlistItem.created_at)
+        select(WishlistItem)
+        .where(WishlistItem.user_id == user.id, *_created_between(WishlistItem, start, end))
+        .order_by(WishlistItem.created_at)
     )
     calculations = await db.scalars(
-        select(Calculation).where(Calculation.user_id == user.id).order_by(Calculation.created_at)
+        select(Calculation)
+        .where(Calculation.user_id == user.id, *_created_between(Calculation, start, end))
+        .order_by(Calculation.created_at)
     )
     return {
         "exported_at": datetime.now(UTC).isoformat(),
+        "range": {"from": _iso(start), "to": _iso(end)},
         "currency": user.currency,
         "expenses": [
             {
@@ -161,8 +194,13 @@ async def export_data(request: Request):
     fmt = (request.args.get("format") or "json").lower()
     if fmt not in ("json", "csv"):
         raise ApiError("Parametr format ma wartość json albo csv", 422)
-    data = await _export_data(request)
-    name = f"worthmytime-{today().isoformat()}.{fmt}"
+    start, end = _date_arg(request, "from"), _date_arg(request, "to")
+    if start and end and start > end:
+        raise ApiError("Parametr from nie może być późniejszy niż to", 422)
+    data = await _export_data(request, start, end)
+    # nazwa pliku mówi, czego dotyczy: zakres dat albo (dla całości) dzień eksportu
+    label = f"{_iso(start) or 'start'}_{_iso(end) or today().isoformat()}" if start or end else today().isoformat()
+    name = f"worthmytime-{label}.{fmt}"
     headers = {"Content-Disposition": f'attachment; filename="{name}"'}
     if fmt == "csv":
         return text(export_csv(data), content_type="text/csv; charset=utf-8", headers=headers)
