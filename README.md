@@ -83,6 +83,19 @@ Skrypty kopii zapasowej, test odtworzenia i monitoring `/health`: [ops/README.md
 
 Zaokrąglamy w jednym miejscu (`app/money.py`): **ROUND_HALF_UP** na zapisie dziesiętnym (2,675 daje 2,68, a 2,5 daje 3; wbudowane `round()` zaokrągla do parzystej i myli się na liczbach binarnych). Kwoty w bazie to `NUMERIC(14,2)`, stawka godzinowa `NUMERIC(14,4)`; w API nadal są zwykłymi liczbami JSON. Kwoty z żądań są zaokrąglane do groszy przed walidacją.
 
+## Przenoszenie środków (rollover)
+
+Dla każdej kategorii budżetu można włączyć przenoszenie niewykorzystanych środków na kolejny miesiąc (`PUT /budget`, pole `rollover`, np. `{"FUN": true}`; pominięte pole zostawia ustawienie bez zmian). `GET /budget` zwraca `rollover` (włączone kategorie) i `rollover_amounts` (kwoty przeniesione na bieżący miesiąc), a `amounts` i `available` już je uwzględniają, tak samo jak prognoza, alerty i analiza zakupu.
+
+Sposób liczenia (`rollover_amount` w `app/budget.py`):
+
+- Liczymy od miesiąca włączenia opcji. W tym miesiącu przeniesienie wynosi 0, pierwsza kwota pojawia się w następnym.
+- Po każdym pełnym miesiącu: `przeniesienie = budżet + poprzednie przeniesienie - wydane`, czyli niewykorzystane środki kumulują się z miesiąca na miesiąc.
+- **Przekroczenie nie przechodzi na minus.** Wydanie ponad budżet zeruje przeniesienie, ale nie pomniejsza budżetu kolejnego miesiąca.
+- **Limit:** przeniesienie nie przekracza jednego miesięcznego budżetu kategorii, więc budżet miesiąca jest najwyżej podwojony.
+- Wstecz sięgamy najwyżej 12 pełnych miesięcy. Wyłączenie opcji kasuje przeniesienie; ponowne włączenie liczy od nowa.
+- Budżet minionych miesięcy liczymy z **dzisiejszego** dochodu, podziału procentowego i rat (historii planu nie przechowujemy). W Potrzebach raty kredytów liczą się jako wydane w każdym miesiącu.
+
 ## Sesja w cookie i CSRF
 
 Logowanie i rejestracja ustawiają cookie `wmt_session` (JWT, HttpOnly) oraz `wmt_csrf` (odczytywalne dla JS). Żądania zmieniające dane (`POST/PUT/DELETE`) uwierzytelnione cookie muszą odesłać wartość `wmt_csrf` w nagłówku `X-CSRF-Token` (inaczej 403). Nagłówek `Authorization: Bearer` nadal działa i nie wymaga CSRF (klienci API). `POST /auth/logout` czyści cookie, a `POST /auth/session` wymienia ważny token Bearer na cookie (migracja z localStorage). CORS z `credentials` działa tylko dla domen z `CORS_ORIGINS`, nigdy dla `*`; przeglądarka z frontendu musi wysyłać żądania z `credentials: "include"`.

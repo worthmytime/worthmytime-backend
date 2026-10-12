@@ -10,9 +10,10 @@ from .budget import analyze
 from .errors import ApiError
 from .helpers import (
     apply_input,
+    apply_rollover,
+    budget_view,
     client_ip,
     current_user,
-    load_ledger,
     load_loans,
     load_plan,
     login_required,
@@ -22,7 +23,6 @@ from .helpers import (
     rate_from_calc,
     rate_from_user,
     resolve_rate_for_request,
-    serialize_budget,
     serialize_calc,
     to_input,
     today,
@@ -32,7 +32,7 @@ from .models import Budget, BudgetLoan, Calculation, User
 from .money import rnd
 from .openapi import SWAGGER_UI_HTML, build_spec
 from .pagination import encode_cursor, escape_like, parse_list_params
-from .planning import period_of, remaining_installments
+from .planning import remaining_installments
 from .schemas import CATEGORIES, BudgetIn, CalculateIn, CalculationIn, CompareIn, Credentials, ProfileIn
 from .security import create_token, decode_token, hash_password, verify_password
 from .session import clear_session_cookies, set_session_cookies
@@ -225,18 +225,9 @@ def _user_income(user: User) -> float | None:
 @login_required
 async def get_budget(request: Request):
     user = request.ctx.user
-    income = _user_income(user)
-    period = period_of(today())
-    return ok(
-        serialize_budget(
-            await request.ctx.db.get(Budget, user.id),
-            income,
-            await load_loans(request, user),
-            _user_rate(user),
-            await load_ledger(request, user, period),
-            period,
-        )
-    )
+    row = await request.ctx.db.get(Budget, user.id)
+    loans = await load_loans(request, user)
+    return ok(await budget_view(request, user, row, loans, _user_income(user), _user_rate(user)))
 
 
 @bp.put("/budget")
@@ -250,7 +241,8 @@ async def put_budget(request: Request):
         request.ctx.db.add(row)
     for cat in CATEGORIES:
         setattr(row, f"pct_{cat.value.lower()}", data.percentages[cat])
-    period = period_of(today())  # wydane w kategoriach liczy rejestr wydatków, nie ten formularz
+    if data.rollover is not None:  # brak pola zostawia dotychczasowe ustawienie
+        apply_rollover(row, data.rollover)
     # lista kredytów jest zastępowana w całości (jak w formularzu: zapis całego planu)
     db = request.ctx.db
     for old in await load_loans(request, user):
@@ -273,11 +265,8 @@ async def put_budget(request: Request):
     ]
     db.add_all(loans)
     await db.commit()
-    return ok(
-        serialize_budget(
-            row, _user_income(user), loans, _user_rate(user), await load_ledger(request, user, period), period
-        )
-    )
+    # wydane w kategoriach liczy rejestr wydatków, nie ten formularz
+    return ok(await budget_view(request, user, row, loans, _user_income(user), _user_rate(user)))
 
 
 # ---------- historia obliczeń ----------

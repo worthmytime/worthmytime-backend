@@ -155,8 +155,10 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
         {
             "percentages": _obj({c: _num for c in ("NEEDS", "FUTURE", "GOALS", "FUN")}),
             "spent": _obj({c: _num for c in ("NEEDS", "FUTURE", "GOALS", "FUN")}),
-            "amounts": {"type": ["object", "null"]},
+            "amounts": {"type": ["object", "null"], "description": "budżet kategorii razem ze środkami przeniesionymi"},
             "available": {"type": ["object", "null"]},
+            "rollover": _obj({c: {"type": "boolean"} for c in ("NEEDS", "FUTURE", "GOALS", "FUN")}),
+            "rollover_amounts": _obj({c: _num for c in ("NEEDS", "FUTURE", "GOALS", "FUN")}),
             "loans": {"type": "array", "items": _obj({"id": _str, "name": _str, "installment_amount": _num})},
             "monthly_loans": _num,
             "monthly_income": _nullable_num,
@@ -388,7 +390,8 @@ OPERATIONS: list[dict] = [
     _op("GET", "/budget", "get_budget", "Profil i budżet", "Plan budżetu z wykorzystaniem kategorii i kredytami",
         (200, "Budżet", "Budget")),
     _op("PUT", "/budget", "put_budget", "Profil i budżet", "Zapis planu budżetu i kredytów", (200, "Budżet", "Budget"),
-        body=s.BudgetIn, description="Procenty kategorii muszą sumować się do 100. Zapis tworzy raty od nowa (nowe identyfikatory)."),
+        body=s.BudgetIn, description="Procenty kategorii muszą sumować się do 100. Zapis tworzy raty od nowa (nowe identyfikatory). "
+        "`rollover` włącza przenoszenie niewykorzystanych środków kategorii na kolejny miesiąc; pominięte pole zostawia ustawienie bez zmian."),
     _op("GET", "/budget/forecast", "budget_forecast", "Profil i budżet", "Dzienny limit i prognoza końca miesiąca",
         (200, "Prognoza kategorii", "Forecast"), extra={409: "Brak dochodu lub stawki w profilu"}),
     _op("POST", "/budget/loans/{loan_id}/pay", "pay_loan_installment", "Profil i budżet",
