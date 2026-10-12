@@ -28,6 +28,7 @@ TAGS = [
     ("Życzenia i cele", "Lista życzeń z okresem ostygnięcia oraz cele oszczędnościowe."),
     ("Raporty", "Podsumowanie miesiąca i eksport danych użytkownika."),
     ("Podpowiedzi Jev", "Kategorie wydatków i kolumny importu rozpoznawane przez Jev; klucz API zna tylko backend."),
+    ("Asystent AI", "Czat o budżecie bieżącego miesiąca; model językowy i klucz są w konfiguracji backendu."),
 ]
 
 # --- schematy odpowiedzi (opisowe; API zwraca zwykłe słowniki JSON) -----------------------------------------
@@ -216,6 +217,14 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
         },
         ["context", "summary"],
     ),
+    "AssistantContext": _obj(
+        {
+            "context": {"type": "array", "items": _str, "description": "zdania o bieżącym miesiącu, które dostaje model"},
+            "configured": {"type": "boolean", "description": "czy asystent ma na serwerze klucz i model"},
+        },
+        ["context", "configured"],
+    ),
+    "AssistantReply": _obj({"reply": _str}, ["reply"]),
     "Forecast": _obj(
         {
             "currency": _str,
@@ -573,6 +582,18 @@ OPERATIONS: list[dict] = [
         (200, "Numer kolumny dla daty, kwoty, opisu i waluty albo null", "ColumnMapping"), auth=False, body=s.MapColumnsIn,
         description="Wejście to nagłówki i kilka przykładowych wartości każdej kolumny (do 30 kolumn), nie cały plik.",
         extra={502: "Jev nie odpowiedział", 503: "Brak klucza Jev na serwerze (`TYPESAFE_API_KEY`)"}),
+    # Asystent AI
+    _op("GET", "/assistant/context", "assistant_context", "Asystent AI", "Dane miesiąca, które dostaje asystent",
+        (200, "Podsumowanie miesiąca jako lista zdań", "AssistantContext"),
+        description="Dochód, budżet i wydatki kategorii, raty, prognoza, największe wydatki, stałe wydatki, cele i wywiad "
+        "o sytuacji życiowej. Dokładnie to trafia do modelu razem z rozmową.",
+        extra={409: "Brak dochodu lub stawki w profilu"}),
+    _op("POST", "/assistant/chat", "assistant_chat", "Asystent AI", "Odpowiedź asystenta na rozmowę",
+        (200, "Odpowiedź modelu", "AssistantReply"), body=s.AssistantChatIn,
+        description="Do 30 wiadomości po 2000 znaków; ostatnia musi być od użytkownika. Serwer dokłada aktualne dane miesiąca "
+        "i woła model z `ASSISTANT_MODEL` przez API zgodne z OpenAI (`ASSISTANT_BASE_URL`). Rozmowa nie jest zapisywana.",
+        extra={409: "Brak dochodu lub stawki w profilu", 502: "Model nie odpowiedział",
+               503: "Asystent nie jest skonfigurowany (`ASSISTANT_API_KEY`, `ASSISTANT_MODEL`)"}),
 ]
 
 _JSON = "application/json"

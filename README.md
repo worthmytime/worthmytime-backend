@@ -89,6 +89,21 @@ Podpowiedzi kategorii wydatków i rozpoznawanie kolumn pliku importu robi Jev. *
 - **Wywiad o sytuacji życiowej** (`GET/PUT /profile/context`: mieszkanie, transport, praca, sprzęt, oszczędności, zwierzęta, zdrowie i rozwój oraz własne kategorie użytkownika) zamieniany jest na zdania (`app/life.py`) i dołączany do pytania o kategorię dla zalogowanego użytkownika, np. „Mieszka z rodzicami: nie płaci czynszu najmu ani raty za mieszkanie.”. Wszystkie pola są opcjonalne.
 - Do Jev trafiają tylko opisy wydatków, zdania z wywiadu (odpowiedzi z list i własny dopisek użytkownika) oraz nagłówki i przykładowe wartości kolumn. W logach zapisujemy sam rodzaj błędu, bez treści zapytania.
 
+## Asystent AI
+
+Czat, który zna bieżący miesiąc użytkownika i podpowiada, jak pokierować wydatkami, żeby pieniędzy wystarczyło do końca miesiąca (`POST /api/v1/assistant/chat`, tylko po zalogowaniu). **Klucz i nazwa modelu są tylko w backendzie.**
+
+| Zmienna | Opis |
+|---|---|
+| `ASSISTANT_API_KEY` | klucz do API modelu; pusty = asystent wyłączony (endpoint zwraca 503) |
+| `ASSISTANT_MODEL` | nazwa modelu, np. `gpt-4o-mini`; wymagana |
+| `ASSISTANT_BASE_URL` | adres API zgodnego z OpenAI Chat Completions, domyślnie `https://api.openai.com/v1`; może wskazywać proxy LiteLLM (`http://litellm:4000/v1`) albo innego dostawcę |
+
+- Przy każdym pytaniu serwer składa aktualne podsumowanie miesiąca (`app/assistant.py`): dochód, budżet i wydatki kategorii, raty, prognoza, dziesięć największych wydatków, stałe wydatki, cele i wywiad o sytuacji życiowej. `GET /api/v1/assistant/context` zwraca te same zdania, żeby użytkownik widział, co wysyłamy.
+- **Te dane i treść rozmowy trafiają do zewnętrznego dostawcy modelu.** Nie wysyłamy e-maila ani identyfikatorów konta.
+- Rozmowa nie jest zapisywana na serwerze; historię trzyma przeglądarka i odsyła ją przy każdym pytaniu (do 30 wiadomości).
+- Asystent korzysta z limitu `RATE_LIMIT_AI_PER_MINUTE`. W logach zapisujemy sam rodzaj błędu, bez treści rozmowy.
+
 ## Przełączniki funkcji (feature flags)
 
 Nowy moduł można wdrożyć wyłączony i włączyć później samą zmianą konfiguracji. Flagi ustawia zmienna `FEATURE_FLAGS`, a aplikacja czyta ją przy starcie, więc po zmianie wystarczy restart kontenera (bez nowego obrazu).
