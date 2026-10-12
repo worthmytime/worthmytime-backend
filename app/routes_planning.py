@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 
 from sanic import Blueprint, Request
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from . import calc
@@ -20,7 +20,16 @@ from .helpers import (
     rate_from_user,
     today,
 )
-from .models import BudgetLoan, Expense, ExpenseTemplate, RecurringExpense, SavingsGoal, User, WishlistItem
+from .models import (
+    BudgetLoan,
+    Expense,
+    ExpenseTemplate,
+    GoalDeposit,
+    RecurringExpense,
+    SavingsGoal,
+    User,
+    WishlistItem,
+)
 from .money import rnd
 from .planning import (
     goal_view,
@@ -556,6 +565,16 @@ def _hourly_rate(user: User) -> float | None:
     return rate_from_user(user).hourly_rate
 
 
+def _record_deposit(request: Request, g: SavingsGoal, amount: float) -> GoalDeposit | None:
+    """Zapisuje w historii zmianę odłożonej kwoty (dodatnia = wpłata, ujemna = wypłata) z dzisiejszą datą."""
+    amount = rnd(amount, 2)
+    if amount == 0:
+        return None
+    d = GoalDeposit(user_id=g.user_id, goal_id=g.id, amount=amount, deposited_on=today())
+    request.ctx.db.add(d)
+    return d
+
+
 def _sync_completion(g: SavingsGoal) -> None:
     done = g.saved_amount >= g.target_amount
     if done and g.completed_at is None:
@@ -587,6 +606,8 @@ async def add_goal(request: Request):
     g = SavingsGoal(user_id=user.id, **data.model_dump())
     _sync_completion(g)
     request.ctx.db.add(g)
+    await request.ctx.db.flush()  # cel dostaje id, którego potrzebuje wpis w historii
+    _record_deposit(request, g, g.saved_amount)  # kwota odłożona już przy tworzeniu celu
     await request.ctx.db.commit()
     return ok(await _single_goal(request, user, g), 201)
 
@@ -597,8 +618,10 @@ async def update_goal(request: Request, goal_id: str):
     data = parse(GoalIn, request)
     user = request.ctx.user
     g = await _own(request, SavingsGoal, goal_id, user, "celu")
+    before = g.saved_amount
     for key, value in data.model_dump().items():
         setattr(g, key, value)
+    _record_deposit(request, g, g.saved_amount - before)  # ręczna korekta kwoty też trafia do historii
     _sync_completion(g)
     await request.ctx.db.commit()
     return ok(await _single_goal(request, user, g))
@@ -613,15 +636,31 @@ async def deposit(request: Request, goal_id: str):
     if g.saved_amount + data.amount < 0:
         raise ApiError("Nie można wypłacić więcej, niż odłożono", 422)
     g.saved_amount = rnd(g.saved_amount + data.amount, 2)
+    _record_deposit(request, g, data.amount)
     _sync_completion(g)
     await request.ctx.db.commit()
     return ok(await _single_goal(request, user, g))
+
+
+@bp.get("/goals/<goal_id:str>/deposits")
+@login_required
+async def list_goal_deposits(request: Request, goal_id: str):
+    """Historia wpłat i wypłat celu, od najnowszych."""
+    g = await _own(request, SavingsGoal, goal_id, request.ctx.user, "celu")
+    rows = await request.ctx.db.scalars(
+        select(GoalDeposit)
+        .where(GoalDeposit.goal_id == g.id)
+        .order_by(GoalDeposit.deposited_on.desc(), GoalDeposit.created_at.desc(), GoalDeposit.id)
+    )
+    items = [{"id": d.id, "amount": d.amount, "deposited_on": d.deposited_on.isoformat()} for d in rows]
+    return ok({"items": items, "total": rnd(sum(d["amount"] for d in items), 2)})
 
 
 @bp.delete("/goals/<goal_id:str>")
 @login_required
 async def delete_goal(request: Request, goal_id: str):
     g = await _own(request, SavingsGoal, goal_id, request.ctx.user, "celu")
+    await request.ctx.db.execute(delete(GoalDeposit).where(GoalDeposit.goal_id == g.id))  # historia znika razem z celem
     await request.ctx.db.delete(g)
     await request.ctx.db.commit()
     return ok({"deleted": True})

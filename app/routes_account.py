@@ -8,7 +8,18 @@ from sqlalchemy import delete, select
 
 from .errors import ApiError
 from .helpers import login_required, ok, parse, user_profile
-from .models import Budget, BudgetLoan, Calculation, Cost, Expense, SavingsGoal, User, WishlistItem
+from .models import (
+    Budget,
+    BudgetLoan,
+    Calculation,
+    Cost,
+    Expense,
+    ExpenseTemplate,
+    GoalDeposit,
+    SavingsGoal,
+    User,
+    WishlistItem,
+)
 from .security import create_token, hash_password, verify_password
 
 bp = Blueprint("account", url_prefix="/api/v1")
@@ -66,7 +77,8 @@ async def delete_account(request: Request):
     db = request.ctx.db
     calc_ids = select(Calculation.id).where(Calculation.user_id == user.id)
     await db.execute(delete(Cost).where(Cost.calculation_id.in_(calc_ids)))
-    for model in (Calculation, Budget, BudgetLoan, Expense, WishlistItem, SavingsGoal):
+    owned = (Calculation, Budget, BudgetLoan, Expense, ExpenseTemplate, WishlistItem, GoalDeposit, SavingsGoal)
+    for model in owned:
         await db.execute(delete(model).where(model.user_id == user.id))
     await db.execute(delete(User).where(User.id == user.id))
     await db.commit()

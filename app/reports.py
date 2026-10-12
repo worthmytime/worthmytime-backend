@@ -27,6 +27,7 @@ def month_report(
     largest: dict | None,
     entries: int,
     hourly_rate: float | None,
+    goal_deposits: float = 0.0,
 ) -> dict:
     """Liczby miesiąca: `plan.spent` to wydatki z rejestru w tym miesiącu, `previous_spent` w poprzednim.
 
@@ -59,6 +60,8 @@ def month_report(
             # odłożone = wpisy w kategorii Przyszłość; niewydane = dochód minus wszystkie wydatki (nie mniej niż 0)
             "future": plan.spent[Category.FUTURE],
             "unspent": rnd(max(0.0, plan.monthly_income - total), 2),
+            # wpłaty na cele pomniejszone o wypłaty w tym miesiącu (z historii wpłat)
+            "goals": rnd(goal_deposits, 2),
         },
         "discretionary": {
             "spent": discretionary,
@@ -98,6 +101,8 @@ def export_rows(data: dict) -> Iterable[dict]:
             "amount": g["saved_amount"],
             "status": "completed" if g["completed_at"] else "active",
         }
+    for d in data.get("goal_deposits", []):
+        yield {**d, "type": "goal_deposit", "date": d["deposited_on"], "name": d["goal_name"]}
     for w in data["wishlist"]:
         yield {**w, "type": "wish", "date": w["created_at"][:10], "amount": w["price"]}
     for c in data["calculations"]:

@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, time, timedelta
 
 from sanic import Blueprint, Request
 from sanic.response import text
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .errors import ApiError
 from .helpers import (
@@ -18,7 +18,7 @@ from .helpers import (
     rate_from_user,
     today,
 )
-from .models import Budget, Calculation, Expense, SavingsGoal, WishlistItem
+from .models import Budget, Calculation, Expense, GoalDeposit, SavingsGoal, WishlistItem
 from .planning import add_months, month_bounds, parse_period, period_of, totals_by_category
 from .reports import export_csv, month_report
 
@@ -69,12 +69,19 @@ async def month_summary(request: Request):
             "note": top.note,
             "spent_on": top.spent_on.isoformat(),
         }
+    start, end = month_bounds(period)
+    deposits = await db.scalar(
+        select(func.coalesce(func.sum(GoalDeposit.amount), 0)).where(
+            GoalDeposit.user_id == user.id, GoalDeposit.deposited_on >= start, GoalDeposit.deposited_on < end
+        )
+    )
     report = month_report(
         plan,
         totals_by_category((e.category, e.amount) for e in previous_rows),
         largest,
         len(rows),
         rate.hourly_rate,
+        float(deposits or 0),
     )
     return ok({"month": period, "previous_month": previous, "currency": user.currency, **report})
 
@@ -118,6 +125,15 @@ async def _export_data(request: Request, start: date | None = None, end: date | 
         .where(SavingsGoal.user_id == user.id, *_created_between(SavingsGoal, start, end))
         .order_by(SavingsGoal.created_at)
     )
+    deposited = ([GoalDeposit.deposited_on >= start] if start else []) + (
+        [GoalDeposit.deposited_on <= end] if end else []
+    )
+    deposits = await db.execute(
+        select(GoalDeposit, SavingsGoal.name)
+        .join(SavingsGoal, SavingsGoal.id == GoalDeposit.goal_id)
+        .where(GoalDeposit.user_id == user.id, *deposited)
+        .order_by(GoalDeposit.deposited_on, GoalDeposit.created_at, GoalDeposit.id)
+    )
     wishes = await db.scalars(
         select(WishlistItem)
         .where(WishlistItem.user_id == user.id, *_created_between(WishlistItem, start, end))
@@ -156,6 +172,16 @@ async def _export_data(request: Request, start: date | None = None, end: date | 
                 "completed_at": _iso(g.completed_at),
             }
             for g in goals
+        ],
+        "goal_deposits": [
+            {
+                "id": d.id,
+                "goal_id": d.goal_id,
+                "goal_name": name,
+                "amount": d.amount,
+                "deposited_on": d.deposited_on.isoformat(),
+            }
+            for d, name in deposits
         ],
         "wishlist": [
             {
