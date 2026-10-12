@@ -228,3 +228,16 @@ class SavingsGoal(Base):
     target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GoalDeposit(Base):
+    """Wpłata na cel (kwota dodatnia) albo wypłata (ujemna); suma wpłat celu równa się jego saved_amount."""
+
+    __tablename__ = "goal_deposits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("savings_goals.id", ondelete="CASCADE"), index=True)
+    amount: Mapped[float] = mapped_column(Money)
+    deposited_on: Mapped[date] = mapped_column(Date, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

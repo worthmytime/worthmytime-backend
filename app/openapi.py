@@ -194,7 +194,7 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
             "previous": {"type": "number", "description": "wydatki łącznie w poprzednim miesiącu"},
             "change": _num,
             "change_percent": _nullable_num,
-            "saved": _obj({"future": _num, "unspent": _num}),
+            "saved": _obj({"future": _num, "unspent": _num, "goals": _num}),
             "discretionary": _obj({"spent": _num, "work_hours": _nullable_num}),
             "largest_expense": {"type": ["object", "null"]},
             "entries": {"type": "integer"},
@@ -292,6 +292,10 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
         ["id", "name", "target_amount", "saved_amount"],
     ),
     "GoalList": _list_of("Goal", currency=_str),
+    "GoalDeposit": _obj(
+        {"id": _str, "amount": _num, "deposited_on": {"type": "string", "format": "date"}}, ["id", "amount", "deposited_on"]
+    ),
+    "GoalDepositList": _list_of("GoalDeposit", total=_num),
     "Alert": _obj(
         {
             "key": _str,
@@ -483,6 +487,9 @@ OPERATIONS: list[dict] = [
     _op("DELETE", "/goals/{goal_id}", "delete_goal", "Życzenia i cele", "Usunięcie celu", (200, "Usunięto", "Deleted")),
     _op("POST", "/goals/{goal_id}/deposit", "deposit", "Życzenia i cele", "Wpłata na cel (lub wypłata, gdy ujemna)",
         (200, "Cel po wpłacie", "Goal"), body=s.DepositIn),
+    _op("GET", "/goals/{goal_id}/deposits", "list_goal_deposits", "Życzenia i cele", "Historia wpłat celu",
+        (200, "Wpłaty i wypłaty od najnowszych", "GoalDepositList"),
+        description="Kwota dodatnia to wpłata, ujemna to wypłata. Suma (`total`) równa się odłożonej kwocie celu."),
     # Raporty
     _op("GET", "/reports/month", "month_summary", "Raporty", "Podsumowanie miesiąca", (200, "Liczby miesiąca", "MonthReport"),
         query=[_q("month", "Miesiąc w formacie YYYY-MM (domyślnie bieżący)")],

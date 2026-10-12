@@ -31,7 +31,7 @@ def test_report_compares_categories_with_budget_and_previous_month():
     assert by["GOALS"]["previous"] == 0 and by["GOALS"]["change_percent"] is None  # nie ma do czego porównać
 
     assert (report["total_spent"], report["previous"], report["change"]) == (3200, 2600, 600)
-    assert report["saved"] == {"future": 500, "unspent": 3800}
+    assert report["saved"] == {"future": 500, "unspent": 3800, "goals": 0}
     assert report["discretionary"] == {"spent": 700, "work_hours": 17.5}  # Cele + Przyjemności przy 40 zł/h
     assert report["largest_expense"] is None and report["entries"] == 4
 
@@ -126,7 +126,7 @@ def test_month_report_on_sample_data(client):
     assert (fun["budget"], fun["spent"], fun["previous"]) == (700, 500, 250)
     assert (fun["change"], fun["change_percent"]) == (250, 100.0)
     assert (body["total_spent"], body["previous"], body["change"]) == (2200, 250, 1950)
-    assert body["saved"] == {"future": 500, "unspent": 4800}
+    assert body["saved"] == {"future": 500, "unspent": 4800, "goals": 0}
     assert body["discretionary"]["spent"] == 500
     assert body["discretionary"]["work_hours"] == pytest.approx(500 / (7000 / (8 * 5 * 52 / 12)), abs=0.1)
     assert (body["largest_expense"]["note"], body["largest_expense"]["amount"]) == ("czynsz", 1200)
