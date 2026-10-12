@@ -45,14 +45,13 @@ def test_wish_expense_category_and_opt_out(client):
     auth = _user(client, "link2@b.pl")
     plain, moved, skipped, dropped = (_wish(client, auth, name=n) for n in ("A", "B", "C", "D"))
 
-    bought = {"decision": "BOUGHT"}
-    assert client.post(f"{WISHLIST}/{plain}/decision", json=bought, headers=auth)[1].json["expense"]["category"] == "FUN"
-    body = {**bought, "category": "NEEDS"}
-    assert client.post(f"{WISHLIST}/{moved}/decision", json=body, headers=auth)[1].json["expense"]["category"] == "NEEDS"
-    body = {**bought, "add_expense": False}
-    assert client.post(f"{WISHLIST}/{skipped}/decision", json=body, headers=auth)[1].json["expense"] is None
-    body = {"decision": "DROPPED"}
-    assert client.post(f"{WISHLIST}/{dropped}/decision", json=body, headers=auth)[1].json["expense"] is None
+    def decide(wish_id, **body):
+        return client.post(f"{WISHLIST}/{wish_id}/decision", json=body, headers=auth)[1].json["expense"]
+
+    assert decide(plain, decision="BOUGHT")["category"] == "FUN"  # pozycja bez kategorii
+    assert decide(moved, decision="BOUGHT", category="NEEDS")["category"] == "NEEDS"
+    assert decide(skipped, decision="BOUGHT", add_expense=False) is None
+    assert decide(dropped, decision="DROPPED") is None
 
     assert sorted(e["note"] for e in _ledger(client, auth)["items"]) == ["A", "B"]
     # usunięcie kupionej pozycji z listy nie rusza wydatku: zakup się odbył
