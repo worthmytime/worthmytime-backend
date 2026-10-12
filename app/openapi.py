@@ -247,7 +247,24 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
     "ExpenseList": _list_of(
         "Expense", month={"type": "string"}, totals=_obj({}), total=_num, loan_payments={"type": "number"}
     ),
-    "ImportResult": _obj({"created": {"type": "integer"}, "skipped": {"type": "integer"}}, ["created", "skipped"]),
+    "ImportResult": _obj(
+        {"created": {"type": "integer"}, "skipped": {"type": "integer"}, "batch_id": {"type": "string", "description": "identyfikator importu w historii"}},
+        ["created", "skipped"],
+    ),
+    "ImportBatch": _obj(
+        {
+            "id": _str,
+            "file_name": {"type": ["string", "null"], "description": "nazwa pliku z rozszerzeniem"},
+            "imported_at": {"type": "string", "format": "date-time"},
+            "created": {"type": "integer"},
+            "skipped": {"type": "integer"},
+            "total": _num,
+            "remaining": {"type": "integer", "description": "wpisy z tego importu, które są jeszcze w rejestrze"},
+            "undone_at": {"type": ["string", "null"], "format": "date-time"},
+        },
+        ["id", "imported_at", "created", "skipped"],
+    ),
+    "ImportBatchList": _list_of("ImportBatch"),
     "ExpenseSummary": _obj({"months": {"type": "array", "items": _obj({"month": _str, "totals": _obj({}), "total": _num})}}),
     "RecurringExpense": _obj(
         {
@@ -462,7 +479,14 @@ OPERATIONS: list[dict] = [
     _op("POST", "/expenses/import", "import_expenses", "Wydatki", "Import wielu wydatków naraz (np. z wyciągu bankowego)",
         (201, "Wpisy dopisane (200, gdy wszystkie już istniały)", "ImportResult"), body=s.ExpenseImportIn,
         description="Idempotentne: pozycja z tym samym `key` nie tworzy drugiego wpisu (`skipped`). Do 500 pozycji na żądanie, "
-        "wpisy mają `source_type=IMPORT`."),
+        "wpisy mają `source_type=IMPORT`. Każdy import trafia do historii (`GET /imports`) z nazwą pliku `file_name`; "
+        "kolejne porcje dużego pliku podają `batch_id` z pierwszej odpowiedzi.",
+        extra={409: "Import wskazany w `batch_id` został cofnięty albo ten sam plik jest właśnie importowany"}),
+    _op("GET", "/imports", "list_imports", "Wydatki", "Historia importów", (200, "Importy od najnowszych", "ImportBatchList")),
+    _op("DELETE", "/imports/{batch_id}", "undo_import", "Wydatki", "Cofnięcie importu", (200, "Import po cofnięciu", "ImportBatch"),
+        description="Usuwa z rejestru wszystkie wpisy dopisane przez ten import (także później edytowane). "
+        "Po cofnięciu ten sam plik można zaimportować ponownie.",
+        extra={409: "Import został już cofnięty"}),
     _op("GET", "/expenses/summary", "expenses_summary", "Wydatki", "Trend wydatków w ostatnich miesiącach",
         (200, "Podsumowanie miesięcy", "ExpenseSummary"),
         query=[_q("months", "Liczba miesięcy (1-24, domyślnie 6)", {"type": "integer", "minimum": 1, "maximum": 24})]),

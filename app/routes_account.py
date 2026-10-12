@@ -16,6 +16,7 @@ from .models import (
     Expense,
     ExpenseTemplate,
     GoalDeposit,
+    ImportBatch,
     SavingsGoal,
     User,
     WishlistItem,
@@ -77,7 +78,17 @@ async def delete_account(request: Request):
     db = request.ctx.db
     calc_ids = select(Calculation.id).where(Calculation.user_id == user.id)
     await db.execute(delete(Cost).where(Cost.calculation_id.in_(calc_ids)))
-    owned = (Calculation, Budget, BudgetLoan, Expense, ExpenseTemplate, WishlistItem, GoalDeposit, SavingsGoal)
+    owned = (
+        Calculation,
+        Budget,
+        BudgetLoan,
+        Expense,
+        ExpenseTemplate,
+        WishlistItem,
+        GoalDeposit,
+        SavingsGoal,
+        ImportBatch,
+    )
     for model in owned:
         await db.execute(delete(model).where(model.user_id == user.id))
     await db.execute(delete(User).where(User.id == user.id))
