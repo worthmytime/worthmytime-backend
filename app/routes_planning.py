@@ -25,6 +25,7 @@ from .models import (
     Expense,
     ExpenseTemplate,
     GoalDeposit,
+    ImportBatch,
     RecurringExpense,
     SavingsGoal,
     User,
@@ -165,6 +166,16 @@ async def import_expenses(request: Request):
     """
     data = parse(ExpenseImportIn, request)
     user, db = request.ctx.user, request.ctx.db
+    # zdarzenie w historii importów: nowe albo (kolejna porcja dużego pliku) wskazane w żądaniu
+    if data.batch_id:
+        batch = await _own(request, ImportBatch, data.batch_id, user, "importu")
+        if batch.undone_at is not None:
+            raise ApiError("Ten import został cofnięty", 409)
+    else:
+        name = (data.file_name or "").strip() or None
+        batch = ImportBatch(user_id=user.id, file_name=name, created=0, skipped=0, total=0.0)
+        db.add(batch)
+        await db.flush()  # import dostaje id, którym oznaczamy jego wpisy
     # klucz łączymy z użytkownikiem, bo unikalność źródła w bazie jest globalna
     ids = {item.key: hashlib.sha256(f"{user.id}:{item.key}".encode()).hexdigest()[:32] for item in data.items}
     existing = set(
@@ -174,7 +185,7 @@ async def import_expenses(request: Request):
             )
         )
     )
-    seen, created = set(existing), 0
+    seen, created, total = set(existing), 0, 0.0
     for item in data.items:
         source_id = ids[item.key]
         if source_id in seen:
@@ -189,15 +200,72 @@ async def import_expenses(request: Request):
                 spent_on=item.spent_on,
                 source_type="IMPORT",
                 source_id=source_id,
+                import_batch_id=batch.id,
             )
         )
         created += 1
+        total += item.amount
+    skipped = len(data.items) - created
+    batch.created += created
+    batch.skipped += skipped
+    batch.total = rnd(batch.total + total, 2)
+    batch_id = batch.id
     try:
         await db.commit()
     except IntegrityError:  # równoległy import tego samego wyciągu
         await db.rollback()
         raise ApiError("Ten import jest już wykonywany, spróbuj ponownie", 409)
-    return ok({"created": created, "skipped": len(data.items) - created}, 201 if created else 200)
+    return ok({"created": created, "skipped": skipped, "batch_id": batch_id}, 201 if created else 200)
+
+
+def _import_batch(b: ImportBatch, remaining: int) -> dict:
+    return {
+        "id": b.id,
+        "file_name": b.file_name,
+        "imported_at": _aware(b.created_at).isoformat(),
+        "created": b.created,
+        "skipped": b.skipped,
+        "total": b.total,
+        # ile wpisów z tego importu jest jeszcze w rejestrze (część mogła zostać usunięta ręcznie)
+        "remaining": remaining,
+        "undone_at": _aware(b.undone_at).isoformat() if b.undone_at else None,
+    }
+
+
+@bp.get("/imports")
+@login_required
+async def list_imports(request: Request):
+    """Historia importów od najnowszych: nazwa pliku, data i godzina, liczba wpisów i to, czy import cofnięto."""
+    user, db = request.ctx.user, request.ctx.db
+    batches = list(
+        await db.scalars(
+            select(ImportBatch)
+            .where(ImportBatch.user_id == user.id)
+            .order_by(ImportBatch.created_at.desc(), ImportBatch.id)
+            .limit(200)
+        )
+    )
+    counts = await db.execute(
+        select(Expense.import_batch_id, func.count())
+        .where(Expense.user_id == user.id, Expense.import_batch_id.in_([b.id for b in batches]))
+        .group_by(Expense.import_batch_id)
+    )
+    remaining = dict(counts.all())
+    return ok({"items": [_import_batch(b, remaining.get(b.id, 0)) for b in batches]})
+
+
+@bp.delete("/imports/<batch_id:str>")
+@login_required
+async def undo_import(request: Request, batch_id: str):
+    """Cofa import: usuwa z rejestru wpisy, które dopisał (także te później edytowane), i oznacza go jako cofnięty."""
+    user, db = request.ctx.user, request.ctx.db
+    batch = await _own(request, ImportBatch, batch_id, user, "importu")
+    if batch.undone_at is not None:
+        raise ApiError("Ten import został już cofnięty", 409)
+    result = await db.execute(delete(Expense).where(Expense.user_id == user.id, Expense.import_batch_id == batch.id))
+    batch.undone_at = _now()
+    await db.commit()
+    return ok({"deleted": result.rowcount, **_import_batch(batch, 0)})
 
 
 @bp.put("/expenses/<expense_id:str>")

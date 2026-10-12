@@ -154,6 +154,10 @@ class ExpenseImportItem(BaseModel):
 
 class ExpenseImportIn(BaseModel):
     items: list[ExpenseImportItem] = Field(min_length=1, max_length=500)
+    # nazwa importowanego pliku z rozszerzeniem: trafia do historii importów
+    file_name: str | None = Field(default=None, max_length=255)
+    # kolejna porcja tego samego pliku (ponad 500 pozycji): identyfikator importu z odpowiedzi na pierwszą porcję
+    batch_id: str | None = Field(default=None, max_length=36)
 
 
 class RecurringIn(BaseModel):
