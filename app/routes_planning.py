@@ -1,9 +1,11 @@
 """Endpointy planowania: rejestr wydatków, lista życzeń i cele oszczędnościowe (wymagają konta)."""
 
+import hashlib
 from datetime import UTC, datetime
 
 from sanic import Blueprint, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from . import calc
 from .errors import ApiError
@@ -18,7 +20,7 @@ from .helpers import (
     rate_from_user,
     today,
 )
-from .models import BudgetLoan, Expense, RecurringExpense, SavingsGoal, User, WishlistItem
+from .models import BudgetLoan, Expense, ExpenseTemplate, RecurringExpense, SavingsGoal, User, WishlistItem
 from .money import rnd
 from .planning import (
     goal_view,
@@ -31,7 +33,19 @@ from .planning import (
     wish_stats,
     wish_view,
 )
-from .schemas import Category, DecisionIn, DepositIn, ExpenseIn, GoalIn, LoanPaymentIn, RecurringIn, WishIn
+from .schemas import (
+    Category,
+    DecisionIn,
+    DepositIn,
+    ExpenseImportIn,
+    ExpenseIn,
+    ExpenseTemplateIn,
+    ExpenseTemplateUseIn,
+    GoalIn,
+    LoanPaymentIn,
+    RecurringIn,
+    WishIn,
+)
 
 bp = Blueprint("planning", url_prefix="/api/v1")
 
@@ -133,6 +147,69 @@ async def add_expense(request: Request):
     return ok(_expense(e), 201)
 
 
+@bp.post("/expenses/import")
+@login_required
+async def import_expenses(request: Request):
+    """Dopisuje wiele wydatków naraz (np. z wyciągu bankowego).
+
+    Idempotentne: ten sam `key` nie tworzy drugiego wpisu.
+    """
+    data = parse(ExpenseImportIn, request)
+    user, db = request.ctx.user, request.ctx.db
+    # klucz łączymy z użytkownikiem, bo unikalność źródła w bazie jest globalna
+    ids = {item.key: hashlib.sha256(f"{user.id}:{item.key}".encode()).hexdigest()[:32] for item in data.items}
+    existing = set(
+        await db.scalars(
+            select(Expense.source_id).where(
+                Expense.user_id == user.id, Expense.source_type == "IMPORT", Expense.source_id.in_(set(ids.values()))
+            )
+        )
+    )
+    seen, created = set(existing), 0
+    for item in data.items:
+        source_id = ids[item.key]
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        db.add(
+            Expense(
+                user_id=user.id,
+                category=item.category.value,
+                amount=item.amount,
+                note=item.note,
+                spent_on=item.spent_on,
+                source_type="IMPORT",
+                source_id=source_id,
+            )
+        )
+        created += 1
+    try:
+        await db.commit()
+    except IntegrityError:  # równoległy import tego samego wyciągu
+        await db.rollback()
+        raise ApiError("Ten import jest już wykonywany, spróbuj ponownie", 409)
+    return ok({"created": created, "skipped": len(data.items) - created}, 201 if created else 200)
+
+
+@bp.put("/expenses/<expense_id:str>")
+@login_required
+async def update_expense(request: Request, expense_id: str):
+    """Edycja wpisu (kategoria, kwota, notatka, data); źródło wpisu zostaje bez zmian."""
+    data = parse(ExpenseIn, request)
+    e = await _own(request, Expense, expense_id, request.ctx.user, "wydatku")
+    if e.source_type == "LOAN":
+        raise ApiError("Wpisu raty kredytu nie edytuje się: usuń go i oznacz ratę ponownie", 409)
+    e.category, e.amount, e.note = data.category.value, data.amount, data.note
+    if data.spent_on:  # brak daty w żądaniu zostawia dotychczasową
+        e.spent_on = data.spent_on
+    try:
+        await request.ctx.db.commit()
+    except IntegrityError:  # to samo źródło ma już wpis z tą datą (np. stały wydatek)
+        await request.ctx.db.rollback()
+        raise ApiError("Ten wpis ma już odpowiednik z tą datą", 409)
+    return ok(_expense(e))
+
+
 @bp.delete("/expenses/<expense_id:str>")
 @login_required
 async def delete_expense(request: Request, expense_id: str):
@@ -228,6 +305,67 @@ async def delete_recurring(request: Request, template_id: str):
     await request.ctx.db.delete(t)  # wpisy już dopisane do rejestru zostają
     await request.ctx.db.commit()
     return ok({"deleted": True})
+
+
+# ---------- szablony wydatków ----------
+
+MAX_EXPENSE_TEMPLATES = 20
+
+
+def _expense_template(t: ExpenseTemplate) -> dict:
+    return {"id": t.id, "name": t.name, "category": t.category, "amount": t.amount}
+
+
+@bp.get("/expense-templates")
+@login_required
+async def list_expense_templates(request: Request):
+    rows = await request.ctx.db.scalars(
+        select(ExpenseTemplate)
+        .where(ExpenseTemplate.user_id == request.ctx.user.id)
+        .order_by(ExpenseTemplate.created_at, ExpenseTemplate.id)
+    )
+    return ok({"items": [_expense_template(t) for t in rows]})
+
+
+@bp.post("/expense-templates")
+@login_required
+async def add_expense_template(request: Request):
+    data = parse(ExpenseTemplateIn, request)
+    user, db = request.ctx.user, request.ctx.db
+    count = await db.scalar(select(func.count()).select_from(ExpenseTemplate).where(ExpenseTemplate.user_id == user.id))
+    if count >= MAX_EXPENSE_TEMPLATES:
+        raise ApiError(f"Możesz mieć najwyżej {MAX_EXPENSE_TEMPLATES} szablonów: usuń któryś, żeby dodać nowy", 409)
+    t = ExpenseTemplate(user_id=user.id, name=data.name, category=data.category.value, amount=data.amount)
+    db.add(t)
+    await db.commit()
+    return ok(_expense_template(t), 201)
+
+
+@bp.delete("/expense-templates/<template_id:str>")
+@login_required
+async def delete_expense_template(request: Request, template_id: str):
+    t = await _own(request, ExpenseTemplate, template_id, request.ctx.user, "szablonu wydatku")
+    await request.ctx.db.delete(t)  # wpisy już dopisane do rejestru zostają
+    await request.ctx.db.commit()
+    return ok({"deleted": True})
+
+
+@bp.post("/expense-templates/<template_id:str>/use")
+@login_required
+async def use_expense_template(request: Request, template_id: str):
+    """Dopisuje do rejestru wpis z szablonu: zwykły wpis ręczny, więc szablon można użyć wiele razy dziennie."""
+    data = parse(ExpenseTemplateUseIn, request)
+    t = await _own(request, ExpenseTemplate, template_id, request.ctx.user, "szablonu wydatku")
+    e = Expense(
+        user_id=request.ctx.user.id,
+        category=t.category,
+        amount=t.amount,
+        note=t.name,
+        spent_on=data.spent_on or today(),
+    )
+    request.ctx.db.add(e)
+    await request.ctx.db.commit()
+    return ok(_expense(e), 201)
 
 
 # ---------- spłata rat ----------
