@@ -15,8 +15,8 @@ from .ratelimit import Limits, RateLimiter
 from .routes import bp
 from .routes_account import bp as account_bp
 from .routes_ai import bp as ai_bp
-from .routes_assistant import bp as assistant_bp
 from .routes_alerts import bp as alerts_bp
+from .routes_assistant import bp as assistant_bp
 from .routes_planning import bp as planning_bp
 from .routes_reports import bp as reports_bp
 
