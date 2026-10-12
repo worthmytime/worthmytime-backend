@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None  # brak = włączone poza trybem DEBUG
     cookie_domain: str | None = None
     trust_proxy: bool = False  # True tylko za zaufanym reverse proxy (adres z X-Forwarded-For)
-    # Jev (TypeSafe AI): klucz tylko w backendzie; adres może wskazywać proxy, np. LiteLLM (http://litellm:4000/typesafe)
+    # Jev (TypeSafe AI): klucz tylko w backendzie; adres może wskazywać proxy LiteLLM (http://litellm:4000/typesafe)
     typesafe_api_key: str = ""
     typesafe_base_url: str = "https://api.typesafe.ai"
     typesafe_model: str = "jev-latest"
