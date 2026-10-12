@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from . import calc
 from .budget import analyze
+from .config import settings
 from .errors import ApiError
 from .helpers import (
     apply_input,
@@ -64,6 +65,12 @@ async def health(request: Request):
     except Exception:
         return ok({"status": "unavailable", "database": "down"}, 503)
     return ok({"status": "ok", "database": "up"})
+
+
+@bp.get("/features")
+async def features(request: Request):
+    """Przełączniki funkcji z konfiguracji (`FEATURE_FLAGS`); funkcja, której tu nie ma, jest wyłączona."""
+    return ok({"features": settings.feature_flag_map})
 
 
 # ---------- auth ----------

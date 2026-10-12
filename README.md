@@ -71,9 +71,21 @@ Kontener wykonuje `alembic upgrade head` przy każdym starcie.
 | `LOGIN_MAX_FAILURES` / `LOGIN_LOCK_SECONDS` | po tylu nieudanych logowaniach na konto z jednego IP (5) blokada na tyle sekund (900) |
 | `TRUST_PROXY` | `true` tylko za zaufanym reverse proxy: adres klienta z `X-Forwarded-For` |
 | `COOKIE_SAMESITE` / `COOKIE_SECURE` / `COOKIE_DOMAIN` | cookie sesji (`wmt_session`, HttpOnly): `lax` przy froncie i API na tej samej stronie, `none` przy różnych domenach (wymaga HTTPS); `COOKIE_SECURE` domyślnie włączone poza `DEBUG` |
+| `FEATURE_FLAGS` | przełączniki funkcji po przecinku, np. `reports,tags=false` (patrz niżej) |
 | `PORT` | domyślnie 8001 (w kontenerze 8000) |
 
 Pełny stack (db + api + web): `docker compose up --build` w katalogu nadrzędnym (wymaga `JWT_SECRET`).
+
+## Przełączniki funkcji (feature flags)
+
+Nowy moduł można wdrożyć wyłączony i włączyć później samą zmianą konfiguracji. Flagi ustawia zmienna `FEATURE_FLAGS`, a aplikacja czyta ją przy starcie, więc po zmianie wystarczy restart kontenera (bez nowego obrazu).
+
+- Format: nazwy po przecinku, np. `FEATURE_FLAGS=reports,tags=false`. Sama nazwa oznacza flagę włączoną; wartości to `true`/`false`, `1`/`0`, `on`/`off`.
+- Nazwa: małe litery, cyfry, `_` i `-`, do 40 znaków. Niepoprawny wpis jest pomijany, a przy `DEBUG=false` aplikacja z nim nie wystartuje.
+- Odczyt: `GET /api/v1/features` (bez logowania) zwraca `{"features": {"reports": true, "tags": false}}`. Flagi, której nie ma w odpowiedzi, frontend traktuje jak wyłączoną.
+- W kodzie backendu: `settings.feature_flag_map.get("reports", False)`.
+
+Flagi są jawne (endpoint jest publiczny), więc nie nadają się do ukrywania czegokolwiek poufnego.
 
 ## Kopie zapasowe i monitoring
 

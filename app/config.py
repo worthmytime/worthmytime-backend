@@ -1,7 +1,28 @@
+import re
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_JWT_SECRET = "dev-secret-change-me-dev-secret-change-me"
 MIN_JWT_SECRET_LENGTH = 32
+
+_FLAG_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+_FLAG_VALUES = {"true": True, "1": True, "on": True, "false": False, "0": False, "off": False}
+
+
+def parse_feature_flags(raw: str) -> tuple[dict[str, bool], list[str]]:
+    """`reports,tags=false` -> ({"reports": True, "tags": False}, []); drugi element to wpisy nie do odczytania."""
+    flags: dict[str, bool] = {}
+    invalid: list[str] = []
+    for entry in (e.strip() for e in raw.split(",")):
+        if not entry:
+            continue
+        name, sep, value = (p.strip().lower() for p in entry.partition("="))
+        enabled = _FLAG_VALUES.get(value) if sep else True  # sama nazwa oznacza flagę włączoną
+        if enabled is None or not _FLAG_NAME.fullmatch(name):
+            invalid.append(entry)
+            continue
+        flags[name] = enabled
+    return flags, invalid
 
 
 class Settings(BaseSettings):
@@ -26,6 +47,8 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None  # brak = włączone poza trybem DEBUG
     cookie_domain: str | None = None
     trust_proxy: bool = False  # True tylko za zaufanym reverse proxy (adres z X-Forwarded-For)
+    # przełączniki funkcji: lista po przecinku, np. "reports,tags=false" (sama nazwa = włączona)
+    feature_flags: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -34,6 +57,10 @@ class Settings(BaseSettings):
     @property
     def effective_cookie_secure(self) -> bool:
         return self.cookie_secure if self.cookie_secure is not None else not self.debug
+
+    @property
+    def feature_flag_map(self) -> dict[str, bool]:
+        return parse_feature_flags(self.feature_flags)[0]
 
     def production_problems(self) -> list[str]:
         """Błędy konfiguracji niedopuszczalne poza trybem DEBUG."""
@@ -46,6 +73,9 @@ class Settings(BaseSettings):
             problems.append("COOKIE_SAMESITE musi mieć wartość lax, strict albo none")
         elif self.cookie_samesite.lower() == "none" and not self.effective_cookie_secure:
             problems.append("COOKIE_SAMESITE=none wymaga COOKIE_SECURE=true")
+        invalid = parse_feature_flags(self.feature_flags)[1]
+        if invalid:
+            problems.append(f"FEATURE_FLAGS zawiera niepoprawne wpisy: {', '.join(invalid)}")
         return problems
 
 
