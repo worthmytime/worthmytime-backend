@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from . import alerts as rules
 from .errors import ApiError
+from .forecast import forecast
 from .helpers import load_loans, load_plan, login_required, ok, rate_from_user, today
 from .models import AlertDismissal, Expense, SavingsGoal, User, WishlistItem
 from .planning import month_bounds, period_of, remaining_installments
@@ -25,6 +26,7 @@ async def compute_alerts(request: Request, user: User) -> list[dict]:
         plan = await load_plan(request, user, rate_from_user(user).monthly_income)
         found += rules.rule_category_usage(plan)
         found += rules.rule_budget_deficit(plan)
+        found += rules.rule_budget_runs_out(forecast(plan, now)["categories"])
 
     loans = await load_loans(request, user)
     start, _ = month_bounds(period_of(now))
@@ -34,6 +36,7 @@ async def compute_alerts(request: Request, user: User) -> list[dict]:
         )
     )
     paid = {(source_id, spent_on.strftime("%Y-%m")) for source_id, spent_on in paid_rows}
+    month_start = now.replace(day=1)
     found += rules.rule_loan_due(
         [
             rules.LoanDue(
@@ -45,6 +48,11 @@ async def compute_alerts(request: Request, user: User) -> list[dict]:
                     now, loan.installments_left, loan.end_date, loan.payment_day
                 )
                 > 0,
+                due_this_month=remaining_installments(
+                    month_start, loan.installments_left, loan.end_date, loan.payment_day
+                )
+                > 0
+                and (loan.start_date is None or loan.start_date <= now),
             )
             for loan in loans
         ],
