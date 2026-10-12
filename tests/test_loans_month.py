@@ -87,6 +87,6 @@ def test_loans_are_added_updated_and_removed_by_id(client):
     # cudzy identyfikator nie daje dostępu do cudzego kredytu
     other = _register(client, "loanm5@b.pl")
     client.put("/api/v1/profile", json=PROFILE, headers=other)
-    mine = client.put(URL, json={"percentages": PERCENTAGES, "loans": [_loan(id=second["id"], name="X")]}, headers=other)
-    assert mine[1].json["loans"][0]["id"] != second["id"]
+    body = {"percentages": PERCENTAGES, "loans": [_loan(id=second["id"], name="X")]}
+    assert client.put(URL, json=body, headers=other)[1].json["loans"][0]["id"] != second["id"]
     assert [x["name"] for x in client.get(URL, headers=auth)[1].json["loans"]] == ["B", "C"]
