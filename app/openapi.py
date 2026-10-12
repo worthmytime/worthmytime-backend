@@ -65,6 +65,7 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
     ),
     "Deleted": _obj({"deleted": {"type": "boolean"}}, ["deleted"]),
     "Health": _obj({"status": {"enum": ["ok", "unavailable"]}, "database": {"enum": ["up", "down"]}}, ["status"]),
+    "Features": _obj({"features": {"type": "object", "additionalProperties": {"type": "boolean"}}}, ["features"]),
     "Profile": _obj(
         {
             "currency": _str,
@@ -325,6 +326,8 @@ OPERATIONS: list[dict] = [
     _op("GET", "/health", "health", "System", "Stan usługi i bazy danych", (200, "Usługa działa", "Health"), auth=False,
         description="Nie podlega limitom żądań (używany przez monitoring). `503`, gdy baza nie odpowiada.",
         extra={503: "Baza danych niedostępna"}),
+    _op("GET", "/features", "features", "System", "Przełączniki funkcji (feature flags)", (200, "Flagi z konfiguracji", "Features"),
+        auth=False, description="Flagi ze zmiennej `FEATURE_FLAGS`. Funkcja, której nie ma na liście, jest wyłączona."),
     _op("GET", "/openapi.json", "openapi_json", "System", "Specyfikacja OpenAPI 3.1 (JSON)", (200, "Specyfikacja", None),
         auth=False),
     _op("GET", "/docs", "swagger_ui", "System", "Dokumentacja interaktywna (Swagger UI)", (200, "Strona HTML", None), auth=False,
