@@ -208,6 +208,14 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
     "ColumnMapping": _obj(
         {"mapping": _obj({f: {"type": ["integer", "null"]} for f in ("date", "amount", "description", "currency")})}, ["mapping"]
     ),
+    "LifeContext": _obj(
+        {
+            "context": {"type": "object", "description": "odpowiedzi z wywiadu; brak odpowiedzi to null"},
+            "summary": {"type": "array", "items": _str, "description": "zdania, które z odpowiedzi dostaje Jev"},
+            "filled": {"type": "boolean"},
+        },
+        ["context", "summary"],
+    ),
     "Forecast": _obj(
         {
             "currency": _str,
@@ -452,6 +460,12 @@ OPERATIONS: list[dict] = [
     _op("GET", "/profile", "get_profile", "Profil i budżet", "Profil finansowy", (200, "Profil", "Profile")),
     _op("PUT", "/profile", "put_profile", "Profil i budżet", "Zapis profilu (dochód lub stawka, dojazd, koszty pracy)",
         (200, "Profil", "Profile"), body=s.ProfileIn),
+    _op("GET", "/profile/context", "get_life_context", "Profil i budżet", "Wywiad o sytuacji życiowej",
+        (200, "Odpowiedzi i ich opis dla Jev", "LifeContext")),
+    _op("PUT", "/profile/context", "put_life_context", "Profil i budżet", "Zapis wywiadu o sytuacji życiowej",
+        (200, "Odpowiedzi i ich opis dla Jev", "LifeContext"), body=s.LifeContextIn,
+        description="Mieszkanie, transport, praca, sprzęt i pozostałe; każde pole jest opcjonalne. Odpowiedzi trafiają do Jev "
+        "jako kontekst przy propozycji kategorii (`POST /ai/categorize`) dla zalogowanego użytkownika."),
     _op("GET", "/budget", "get_budget", "Profil i budżet", "Plan budżetu z wykorzystaniem kategorii i kredytami",
         (200, "Budżet", "Budget")),
     _op("PUT", "/budget", "put_budget", "Profil i budżet", "Zapis planu budżetu i kredytów", (200, "Budżet", "Budget"),
@@ -548,7 +562,8 @@ OPERATIONS: list[dict] = [
     _op("POST", "/ai/categorize", "ai_categorize", "Podpowiedzi Jev", "Propozycja kategorii budżetu dla wydatków",
         (200, "Kategoria dla każdego klucza (pozycje bez pewnej odpowiedzi są pomijane)", "CategorySuggestions"),
         auth=False, body=s.CategorizeIn,
-        description="Do 60 pozycji na żądanie. Osobny limit żądań na adres IP (`RATE_LIMIT_AI_PER_MINUTE`).",
+        description="Do 60 pozycji na żądanie. Osobny limit żądań na adres IP (`RATE_LIMIT_AI_PER_MINUTE`). "
+        "Dla zalogowanego użytkownika z wypełnionym wywiadem (`/profile/context`) Jev dostaje też opis jego sytuacji życiowej.",
         extra={502: "Jev nie odpowiedział", 503: "Brak klucza Jev na serwerze (`TYPESAFE_API_KEY`)"}),
     _op("POST", "/ai/map-columns", "ai_map_columns", "Podpowiedzi Jev", "Rozpoznanie kolumn pliku z historią transakcji",
         (200, "Numer kolumny dla daty, kwoty, opisu i waluty albo null", "ColumnMapping"), auth=False, body=s.MapColumnsIn,

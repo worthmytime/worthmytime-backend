@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -36,6 +36,8 @@ class User(Base):
     commute_minutes_per_day: Mapped[float] = mapped_column(Float, default=0.0)
     work_costs_monthly: Mapped[float] = mapped_column(Money, default=0.0)
     rate_mode: Mapped[str] = mapped_column(String(7), default="NOMINAL")
+    # wywiad o sytuacji życiowej (mieszkanie, transport, praca, sprzęt): kontekst dla Jev; brak = niewypełniony
+    life_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     calculations: Mapped[list["Calculation"]] = relationship(
