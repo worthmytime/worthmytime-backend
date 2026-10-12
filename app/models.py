@@ -125,6 +125,11 @@ class Budget(Base):
     spent_fun: Mapped[float] = mapped_column(Money, default=0.0)
     # miesiąc (YYYY-MM), którego dotyczą ręczne kwoty spent_*; po zmianie miesiąca wygasają
     spent_period: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # przenoszenie niewykorzystanych środków: miesiąc (YYYY-MM) włączenia opcji w kategorii; brak = wyłączone
+    rollover_since_needs: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    rollover_since_future: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    rollover_since_goals: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    rollover_since_fun: Mapped[str | None] = mapped_column(String(7), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 class Expense(Base):

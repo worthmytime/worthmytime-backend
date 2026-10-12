@@ -65,6 +65,8 @@ class BudgetIn(BaseModel):
     spent: dict[Category, float] = Field(default_factory=dict)
     # kredyty i pożyczki: raty wchodzą automatycznie do kategorii NEEDS, więc nie wpisuje się ich w `spent`
     loans: list[LoanIn] = Field(default_factory=list, max_length=30)
+    # przenoszenie niewykorzystanych środków na kolejny miesiąc, per kategoria; brak pola = bez zmian
+    rollover: dict[Category, bool] | None = None
 
     @model_validator(mode="after")
     def _check(self):
@@ -77,6 +79,8 @@ class BudgetIn(BaseModel):
         if any(v < 0 for v in spent.values()):
             raise ValueError("Wydatki w kategorii nie mogą być ujemne")
         self.percentages, self.spent = pct, spent
+        if self.rollover is not None:
+            self.rollover = {c: bool(self.rollover.get(c, False)) for c in CATEGORIES}
         return self
 
 
