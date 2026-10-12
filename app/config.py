@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     typesafe_base_url: str = "https://api.typesafe.ai"
     typesafe_model: str = "jev-latest"
     typesafe_timeout_seconds: float = 15.0
+    # Asystent AI: model językowy przez API zgodne z OpenAI Chat Completions (OpenAI, proxy LiteLLM itp.).
+    # Klucz i nazwa modelu tylko w backendzie; bez nich asystent jest wyłączony.
+    assistant_api_key: str = ""
+    assistant_base_url: str = "https://api.openai.com/v1"
+    assistant_model: str = ""
+    assistant_timeout_seconds: float = 60.0
     # przełączniki funkcji: lista po przecinku, np. "reports,tags=false" (sama nazwa = włączona)
     feature_flags: str = ""
 
@@ -81,6 +87,8 @@ class Settings(BaseSettings):
             problems.append("COOKIE_SAMESITE=none wymaga COOKIE_SECURE=true")
         if not self.typesafe_base_url.lower().startswith(("https://", "http://")):
             problems.append("TYPESAFE_BASE_URL musi zaczynać się od https:// albo http://")
+        if not self.assistant_base_url.lower().startswith(("https://", "http://")):
+            problems.append("ASSISTANT_BASE_URL musi zaczynać się od https:// albo http://")
         invalid = parse_feature_flags(self.feature_flags)[1]
         if invalid:
             problems.append(f"FEATURE_FLAGS zawiera niepoprawne wpisy: {', '.join(invalid)}")

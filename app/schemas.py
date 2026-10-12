@@ -332,3 +332,20 @@ class LifeContextIn(BaseModel):
         self.pets_description = (self.pets_description or "").strip() or None
         self.notes = (self.notes or "").strip() or None
         return self
+
+
+class AssistantMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class AssistantChatIn(BaseModel):
+    """Rozmowa z asystentem: od najstarszej wiadomości, ostatnia jest pytaniem użytkownika."""
+
+    messages: list[AssistantMessage] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def _ends_with_user(self):
+        if self.messages[-1].role != "user":
+            raise ValueError("Ostatnia wiadomość musi pochodzić od użytkownika")
+        return self
