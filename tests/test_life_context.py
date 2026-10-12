@@ -48,9 +48,9 @@ def test_summary_describes_each_answer_in_group_order():
         "Ma własny samochód (wiek auta: 8 lat).",
         "Nie dojeżdża do pracy.",
         "Pracuje zdalnie, z domu.",
-        "Jest zatrudniony na etacie lub umowie.",
-        "Jego telefon ma 3 lata.",
-        "Jego komputer ma 1 rok.",
+        "Pracuje na etacie lub umowie.",
+        "Telefon ma 3 lata.",
+        "Komputer ma 1 rok.",
         "Ma poduszkę finansową na 3 mies. wydatków.",
         "Regularnie odkłada pieniądze.",
         "Nie inwestuje.",
@@ -59,13 +59,13 @@ def test_summary_describes_each_answer_in_group_order():
         "Regularnie uprawia sport lub chodzi na siłownię.",
         "Płaci za naukę, studia lub kursy.",
         "Hobby: fotografia, co kilka miesięcy kupuję sprzęt",
-        "Sam o sobie dodaje: odkładam na własne mieszkanie",
+        "Własny dopisek: odkładam na własne mieszkanie",
     ]
 
 
 def test_summary_skips_unanswered_questions():
     assert life.summary(None) == [] and life.summary({}) == []
-    assert life.summary({"car": "NONE", "household_size": 1}) == ["Mieszka sam.", "Nie ma samochodu."]
+    assert life.summary({"car": "NONE", "household_size": 1}) == ["Mieszka w pojedynkę.", "Nie ma samochodu."]
     assert life.summary({"car": "FINANCED"}) == ["Ma samochód w leasingu albo na kredyt."]
 
 
