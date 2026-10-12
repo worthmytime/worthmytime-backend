@@ -53,8 +53,8 @@ def parse(model: type[M], request: Request) -> M:
         raise ApiError("Błąd walidacji danych", 422, errors) from e
 
 
-def ok(data, status: int = 200):
-    return json_response(data, status=status)
+def ok(data, status: int = 200, headers: dict | None = None):
+    return json_response(data, status=status, headers=headers)
 
 
 async def current_user(request: Request) -> User | None:

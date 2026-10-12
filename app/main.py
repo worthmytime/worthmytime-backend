@@ -16,6 +16,7 @@ from .routes import bp
 from .routes_account import bp as account_bp
 from .routes_alerts import bp as alerts_bp
 from .routes_planning import bp as planning_bp
+from .routes_reports import bp as reports_bp
 
 log = setup_logging()
 
@@ -125,6 +126,7 @@ def create_app(database_url: str | None = None, create_schema: bool = False, lim
     app.blueprint(planning_bp)
     app.blueprint(account_bp)
     app.blueprint(alerts_bp)
+    app.blueprint(reports_bp)
     return app
 
 
