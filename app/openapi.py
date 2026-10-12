@@ -26,6 +26,7 @@ TAGS = [
     ("Profil i budżet", "Stawka, plan budżetu, kredyty, prognoza i alerty."),
     ("Wydatki", "Rejestr wydatków, stałe wydatki i szablony szybkich wpisów."),
     ("Życzenia i cele", "Lista życzeń z okresem ostygnięcia oraz cele oszczędnościowe."),
+    ("Raporty", "Podsumowanie miesiąca i eksport danych użytkownika."),
 ]
 
 # --- schematy odpowiedzi (opisowe; API zwraca zwykłe słowniki JSON) -----------------------------------------
@@ -167,6 +168,38 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
             "is_custom": {"type": "boolean"},
         },
         ["percentages"],
+    ),
+    "MonthReport": _obj(
+        {
+            "month": _str,
+            "previous_month": _str,
+            "currency": _str,
+            "monthly_income": _num,
+            "categories": {
+                "type": "array",
+                "items": _obj(
+                    {
+                        "category": _str,
+                        "budget": _num,
+                        "spent": _num,
+                        "available": _num,
+                        "usage_percent": _nullable_num,
+                        "previous": _num,
+                        "change": _num,
+                        "change_percent": _nullable_num,
+                    }
+                ),
+            },
+            "total_spent": _num,
+            "previous": {"type": "number", "description": "wydatki łącznie w poprzednim miesiącu"},
+            "change": _num,
+            "change_percent": _nullable_num,
+            "saved": _obj({"future": _num, "unspent": _num}),
+            "discretionary": _obj({"spent": _num, "work_hours": _nullable_num}),
+            "largest_expense": {"type": ["object", "null"]},
+            "entries": {"type": "integer"},
+        },
+        ["month", "categories", "total_spent"],
     ),
     "Forecast": _obj(
         {
@@ -450,6 +483,17 @@ OPERATIONS: list[dict] = [
     _op("DELETE", "/goals/{goal_id}", "delete_goal", "Życzenia i cele", "Usunięcie celu", (200, "Usunięto", "Deleted")),
     _op("POST", "/goals/{goal_id}/deposit", "deposit", "Życzenia i cele", "Wpłata na cel (lub wypłata, gdy ujemna)",
         (200, "Cel po wpłacie", "Goal"), body=s.DepositIn),
+    # Raporty
+    _op("GET", "/reports/month", "month_summary", "Raporty", "Podsumowanie miesiąca", (200, "Liczby miesiąca", "MonthReport"),
+        query=[_q("month", "Miesiąc w formacie YYYY-MM (domyślnie bieżący)")],
+        description="Wydatki kontra budżet per kategoria, odłożone (wpisy w Przyszłości) i niewydane, godziny pracy poświęcone na "
+        "wydatki uznaniowe (Cele i Przyjemności), największy wydatek i porównanie z poprzednim miesiącem. Budżet minionych miesięcy "
+        "liczony jest z dzisiejszego dochodu, podziału i rat.",
+        extra={409: "Brak dochodu lub stawki w profilu"}),
+    _op("GET", "/export", "export_data", "Raporty", "Eksport danych użytkownika (JSON albo CSV)", (200, "Plik do pobrania", None),
+        query=[_q("format", "Format pliku (domyślnie json)", {"enum": ["json", "csv"]})],
+        description="Wydatki, cele, lista życzeń i zapisane obliczenia. CSV to jedna tabela z typem wiersza w kolumnie `type` "
+        "(UTF-8 z BOM); JSON zawiera pełne dane. Odpowiedź ma nagłówek `Content-Disposition: attachment`."),
 ]
 
 _JSON = "application/json"
