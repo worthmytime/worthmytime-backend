@@ -42,7 +42,7 @@ WORK_MODE = {
     "NOT_WORKING": "Obecnie nie pracuje.",
 }
 EMPLOYMENT = {
-    "EMPLOYEE": "Jest zatrudniony na etacie lub umowie.",
+    "EMPLOYEE": "Pracuje na etacie lub umowie.",
     "SELF_EMPLOYED": "Prowadzi własną działalność.",
     "STUDENT": "Studiuje lub się uczy.",
     "RETIRED": "Jest na emeryturze lub rencie.",
@@ -70,7 +70,7 @@ def summary(context: dict | None) -> list[str]:
         out.append(HOUSING[c["housing"]])
     if c.get("household_size") is not None:
         size = c["household_size"]
-        out.append("Mieszka sam." if size == 1 else f"Gospodarstwo domowe liczy {size} os.")
+        out.append("Mieszka w pojedynkę." if size == 1 else f"Gospodarstwo domowe liczy {size} os.")
     if c.get("children") is not None:
         kids = c["children"]
         out.append("Nie ma dzieci na utrzymaniu." if kids == 0 else f"Ma na utrzymaniu dzieci: {kids}.")
@@ -90,9 +90,9 @@ def summary(context: dict | None) -> list[str]:
         out.append(EMPLOYMENT[c["employment"]])
 
     if c.get("phone_age_years") is not None:
-        out.append(f"Jego telefon ma {years(c['phone_age_years'])}.")
+        out.append(f"Telefon ma {years(c['phone_age_years'])}.")
     if c.get("computer_age_years") is not None:
-        out.append(f"Jego komputer ma {years(c['computer_age_years'])}.")
+        out.append(f"Komputer ma {years(c['computer_age_years'])}.")
 
     months = c.get("emergency_fund_months")
     if c.get("has_emergency_fund") is False:
@@ -125,5 +125,5 @@ def summary(context: dict | None) -> list[str]:
             out.append(f"{name}: {description}")
     notes = (c.get("notes") or "").strip()
     if notes:
-        out.append(f"Sam o sobie dodaje: {notes}")
+        out.append(f"Własny dopisek: {notes}")
     return out
