@@ -267,6 +267,22 @@ class MapColumnsIn(BaseModel):
         return self
 
 
+class LifeCustomItem(BaseModel):
+    """Własna kategoria wywiadu: coś ważnego w życiu użytkownika, czego nie ma na liście pytań."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=40)
+    description: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def _trim(self):
+        self.name, self.description = self.name.strip(), self.description.strip()
+        if not self.name or not self.description:
+            raise ValueError("Podaj nazwę i opis własnej kategorii")
+        return self
+
+
 class LifeContextIn(BaseModel):
     """Wywiad o sytuacji życiowej; każde pole jest opcjonalne (null = brak odpowiedzi)."""
 
@@ -286,14 +302,30 @@ class LifeContextIn(BaseModel):
     # sprzęt
     phone_age_years: int | None = Field(default=None, ge=0, le=20)
     computer_age_years: int | None = Field(default=None, ge=0, le=30)
-    # pozostałe
+    # oszczędności
     has_emergency_fund: bool | None = None
+    emergency_fund_months: int | None = Field(default=None, ge=0, le=120)  # na ile miesięcy wydatków wystarczy
+    saves_regularly: bool | None = None
+    invests: bool | None = None
+    # zwierzęta
     has_pets: bool | None = None
+    pets_description: str | None = Field(default=None, max_length=100)  # np. "pies i dwa koty"
+    # zdrowie i rozwój
+    regular_health_costs: bool | None = None
+    does_sport: bool | None = None
+    pays_for_education: bool | None = None
+    # własne kategorie użytkownika i dopisek
+    custom: list[LifeCustomItem] = Field(default_factory=list, max_length=10)
     notes: str | None = Field(default=None, max_length=300)
 
     @model_validator(mode="after")
     def _tidy(self):
         if self.car in (None, "NONE"):
             self.car_age_years = None  # wiek auta ma sens tylko, gdy auto jest
+        if self.has_emergency_fund is False:
+            self.emergency_fund_months = None
+        if self.has_pets is False:
+            self.pets_description = None
+        self.pets_description = (self.pets_description or "").strip() or None
         self.notes = (self.notes or "").strip() or None
         return self

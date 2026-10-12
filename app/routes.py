@@ -192,7 +192,10 @@ async def put_life_context(request: Request):
     """Zapis wywiadu o sytuacji życiowej; pusty wywiad (same null) usuwa zapisane odpowiedzi."""
     data = parse(LifeContextIn, request)
     user = request.ctx.user
-    user.life_context = data.model_dump(exclude_none=True) or None
+    answers = data.model_dump(exclude_none=True)
+    if not answers.get("custom"):
+        answers.pop("custom", None)  # pusta lista własnych kategorii to brak odpowiedzi
+    user.life_context = answers or None
     await request.ctx.db.commit()
     return ok(_life_context(user))
 
