@@ -148,14 +148,17 @@ def rule_loan_due(
     return out
 
 
-def rule_budget_runs_out(forecast_rows: Iterable[dict]) -> list[dict]:
+def rule_budget_runs_out(forecast_rows: Iterable[dict], already_alerted: Iterable[str] = ()) -> list[dict]:
     """BUDGET_RUNS_OUT: przy obecnym tempie wydatków budżet kategorii skończy się przed końcem miesiąca.
 
-    forecast_rows: kategorie z prognozy (`app/forecast.py`). Kategoria już przekroczona ma własny alert CATEGORY_USAGE.
+    forecast_rows: kategorie z prognozy (`app/forecast.py`).
+    already_alerted: kategorie, które mają już alert CATEGORY_USAGE (od 80% budżetu); nie ostrzegamy o nich drugi raz.
+    Ten alert jest więc wczesnym ostrzeżeniem: wydatki są jeszcze poniżej 80%, ale tempo jest za wysokie.
     """
+    skip = set(already_alerted)
     out = []
     for row in forecast_rows:
-        if row.get("status") != "WARN" or not row.get("runs_out_on"):
+        if row.get("status") != "WARN" or not row.get("runs_out_on") or row["category"] in skip:
             continue
         out.append(
             alert(

@@ -24,9 +24,10 @@ async def compute_alerts(request: Request, user: User) -> list[dict]:
     has_rate = user.hourly_rate is not None or user.monthly_income is not None
     if has_rate:
         plan = await load_plan(request, user, rate_from_user(user).monthly_income)
-        found += rules.rule_category_usage(plan)
+        usage = rules.rule_category_usage(plan)
+        found += usage
         found += rules.rule_budget_deficit(plan)
-        found += rules.rule_budget_runs_out(forecast(plan, now)["categories"])
+        found += rules.rule_budget_runs_out(forecast(plan, now)["categories"], {a["params"]["category"] for a in usage})
 
     loans = await load_loans(request, user)
     start, _ = month_bounds(period_of(now))

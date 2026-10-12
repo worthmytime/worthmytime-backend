@@ -220,3 +220,5 @@ def test_budget_runs_out_alert_from_forecast():
     (a,) = rules.rule_budget_runs_out(rows)
     assert (a["key"], a["level"], a["state"]) == ("BUDGET_RUNS_OUT:FUN", "warning", "2026-10-18")
     assert a["params"]["runs_out_on"] == "2026-10-18" and a["link"] == "/budget"
+    # kategoria, która ma już alert o wykorzystaniu budżetu, nie dostaje drugiego
+    assert rules.rule_budget_runs_out(rows, {"FUN"}) == []
