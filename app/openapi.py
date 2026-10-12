@@ -27,6 +27,7 @@ TAGS = [
     ("Wydatki", "Rejestr wydatków, stałe wydatki i szablony szybkich wpisów."),
     ("Życzenia i cele", "Lista życzeń z okresem ostygnięcia oraz cele oszczędnościowe."),
     ("Raporty", "Podsumowanie miesiąca i eksport danych użytkownika."),
+    ("Podpowiedzi Jev", "Kategorie wydatków i kolumny importu rozpoznawane przez Jev; klucz API zna tylko backend."),
 ]
 
 # --- schematy odpowiedzi (opisowe; API zwraca zwykłe słowniki JSON) -----------------------------------------
@@ -200,6 +201,12 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
             "entries": {"type": "integer"},
         },
         ["month", "categories", "total_spent"],
+    ),
+    "CategorySuggestions": _obj(
+        {"suggestions": {"type": "object", "additionalProperties": {"enum": ["NEEDS", "FUTURE", "GOALS", "FUN"]}}}, ["suggestions"]
+    ),
+    "ColumnMapping": _obj(
+        {"mapping": _obj({f: {"type": ["integer", "null"]} for f in ("date", "amount", "description", "currency")})}, ["mapping"]
     ),
     "Forecast": _obj(
         {
@@ -513,6 +520,16 @@ OPERATIONS: list[dict] = [
         description="Wydatki, cele, lista życzeń i zapisane obliczenia. CSV to jedna tabela z typem wiersza w kolumnie `type` "
         "(UTF-8 z BOM); JSON zawiera pełne dane. Odpowiedź ma nagłówek `Content-Disposition: attachment`. "
         "Zakres `from`/`to` dotyczy daty wydatku, a dla celów, życzeń i obliczeń daty utworzenia."),
+    # Podpowiedzi Jev
+    _op("POST", "/ai/categorize", "ai_categorize", "Podpowiedzi Jev", "Propozycja kategorii budżetu dla wydatków",
+        (200, "Kategoria dla każdego klucza (pozycje bez pewnej odpowiedzi są pomijane)", "CategorySuggestions"),
+        auth=False, body=s.CategorizeIn,
+        description="Do 60 pozycji na żądanie. Osobny limit żądań na adres IP (`RATE_LIMIT_AI_PER_MINUTE`).",
+        extra={502: "Jev nie odpowiedział", 503: "Brak klucza Jev na serwerze (`TYPESAFE_API_KEY`)"}),
+    _op("POST", "/ai/map-columns", "ai_map_columns", "Podpowiedzi Jev", "Rozpoznanie kolumn pliku z historią transakcji",
+        (200, "Numer kolumny dla daty, kwoty, opisu i waluty albo null", "ColumnMapping"), auth=False, body=s.MapColumnsIn,
+        description="Wejście to nagłówki i kilka przykładowych wartości każdej kolumny (do 30 kolumn), nie cały plik.",
+        extra={502: "Jev nie odpowiedział", 503: "Brak klucza Jev na serwerze (`TYPESAFE_API_KEY`)"}),
 ]
 
 _JSON = "application/json"

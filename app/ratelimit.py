@@ -17,6 +17,7 @@ class Limits:
     enabled: bool = True
     api_per_minute: int = 300  # wszystkie żądania z jednego adresu IP
     auth_per_minute: int = 20  # logowanie i rejestracja z jednego adresu IP
+    ai_per_minute: int = 20  # prośby o podpowiedź Jev z jednego adresu IP (każda kosztuje)
     login_max_failures: int = 5  # nieudane logowania na jedno konto (z jednego IP)
     login_window_seconds: int = 900  # okno liczenia porażek i czas blokady
 
@@ -69,6 +70,7 @@ class RateLimiter:
         self.limits = limits
         self.api = SlidingWindow(limits.api_per_minute, 60, clock)
         self.auth = SlidingWindow(limits.auth_per_minute, 60, clock)
+        self.ai = SlidingWindow(limits.ai_per_minute, 60, clock)
         self.failures = SlidingWindow(limits.login_max_failures, limits.login_window_seconds, clock)
 
     def check_api(self, ip: str) -> int:
@@ -76,6 +78,9 @@ class RateLimiter:
 
     def check_auth(self, ip: str) -> int:
         return self.auth.hit(ip) if self.limits.enabled else 0
+
+    def check_ai(self, ip: str) -> int:
+        return self.ai.hit(ip) if self.limits.enabled else 0
 
     @staticmethod
     def _login_key(ip: str, email: str) -> str:

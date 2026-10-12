@@ -71,10 +71,22 @@ Kontener wykonuje `alembic upgrade head` przy każdym starcie.
 | `LOGIN_MAX_FAILURES` / `LOGIN_LOCK_SECONDS` | po tylu nieudanych logowaniach na konto z jednego IP (5) blokada na tyle sekund (900) |
 | `TRUST_PROXY` | `true` tylko za zaufanym reverse proxy: adres klienta z `X-Forwarded-For` |
 | `COOKIE_SAMESITE` / `COOKIE_SECURE` / `COOKIE_DOMAIN` | cookie sesji (`wmt_session`, HttpOnly): `lax` przy froncie i API na tej samej stronie, `none` przy różnych domenach (wymaga HTTPS); `COOKIE_SECURE` domyślnie włączone poza `DEBUG` |
+| `TYPESAFE_API_KEY` | klucz Jev (TypeSafe AI) do podpowiedzi kategorii i kolumn importu; pusty = podpowiedzi wyłączone (patrz niżej) |
+| `TYPESAFE_BASE_URL` / `TYPESAFE_MODEL` | adres API Jev (domyślnie `https://api.typesafe.ai`, może wskazywać proxy) i model (domyślnie `jev-latest`) |
+| `RATE_LIMIT_AI_PER_MINUTE` | prośby o podpowiedź Jev na minutę z jednego IP (20) |
 | `FEATURE_FLAGS` | przełączniki funkcji po przecinku, np. `reports,tags=false` (patrz niżej) |
 | `PORT` | domyślnie 8001 (w kontenerze 8000) |
 
 Pełny stack (db + api + web): `docker compose up --build` w katalogu nadrzędnym (wymaga `JWT_SECRET`).
+
+## Jev (TypeSafe AI)
+
+Podpowiedzi kategorii wydatków i rozpoznawanie kolumn pliku importu robi Jev. **Klucz API jest tylko w backendzie**: frontend woła `POST /api/v1/ai/categorize` i `POST /api/v1/ai/map-columns`, a backend przekazuje pytanie do Jev (`app/jev.py`). W przeglądarce ani w kontenerze frontendu klucza nie ma.
+
+- Ustaw `TYPESAFE_API_KEY` w `.env` backendu (docker-compose podaje go kontenerowi jako zmienną środowiskową; klucz nie jest wbudowywany w obraz). Bez klucza endpointy zwracają 503, a frontend przechodzi na dopasowanie bez Jev.
+- `TYPESAFE_BASE_URL` może wskazywać proxy LiteLLM z repozytorium `worthmytime-infrastructure` (`http://litellm:4000/typesafe`); wtedy `TYPESAFE_API_KEY` to wirtualny klucz LiteLLM, a prawdziwy klucz Jev zna tylko proxy.
+- Endpointy działają też bez konta (import wyciągu nie wymaga logowania), dlatego mają własny limit `RATE_LIMIT_AI_PER_MINUTE` i ograniczenia rozmiaru wejścia: do 60 opisów albo 30 kolumn z kilkoma przykładami na żądanie.
+- Do Jev trafiają tylko opisy wydatków oraz nagłówki i przykładowe wartości kolumn. W logach zapisujemy sam rodzaj błędu, bez treści zapytania.
 
 ## Przełączniki funkcji (feature flags)
 
