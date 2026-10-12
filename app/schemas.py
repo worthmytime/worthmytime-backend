@@ -2,7 +2,7 @@ from datetime import date
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, EmailStr, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field, model_validator
 
 from .money import coerce_money, coerce_rate
 
@@ -264,4 +264,36 @@ class MapColumnsIn(BaseModel):
     def _unique_indexes(self):
         if len({c.index for c in self.columns}) != len(self.columns):
             raise ValueError("Numery kolumn muszą być różne")
+        return self
+
+
+class LifeContextIn(BaseModel):
+    """Wywiad o sytuacji życiowej; każde pole jest opcjonalne (null = brak odpowiedzi)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # mieszkanie i gospodarstwo domowe
+    housing: Literal["WITH_PARENTS", "RENT", "OWN_MORTGAGE", "OWN", "OTHER"] | None = None
+    household_size: int | None = Field(default=None, ge=1, le=15)
+    children: int | None = Field(default=None, ge=0, le=12)
+    # transport
+    car: Literal["NONE", "OWN", "FINANCED"] | None = None
+    car_age_years: int | None = Field(default=None, ge=0, le=60)
+    commute: Literal["CAR", "PUBLIC", "BIKE_WALK", "NONE"] | None = None
+    # praca
+    work_mode: Literal["REMOTE", "HYBRID", "ONSITE", "NOT_WORKING"] | None = None
+    employment: Literal["EMPLOYEE", "SELF_EMPLOYED", "STUDENT", "RETIRED", "OTHER"] | None = None
+    # sprzęt
+    phone_age_years: int | None = Field(default=None, ge=0, le=20)
+    computer_age_years: int | None = Field(default=None, ge=0, le=30)
+    # pozostałe
+    has_emergency_fund: bool | None = None
+    has_pets: bool | None = None
+    notes: str | None = Field(default=None, max_length=300)
+
+    @model_validator(mode="after")
+    def _tidy(self):
+        if self.car in (None, "NONE"):
+            self.car_age_years = None  # wiek auta ma sens tylko, gdy auto jest
+        self.notes = (self.notes or "").strip() or None
         return self
