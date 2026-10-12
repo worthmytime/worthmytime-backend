@@ -234,3 +234,30 @@ class CompareIn(BaseModel):
         if (self.a is None) == (self.a_id is None) or (self.b is None) == (self.b_id is None):
             raise ValueError("Każda strona porównania wymaga dokładnie jednego z: a/a_id oraz b/b_id")
         return self
+
+
+class CategorizeItem(BaseModel):
+    key: str = Field(min_length=1, max_length=200)  # identyfikator po stronie klienta, wraca w odpowiedzi
+    description: str = Field(min_length=1, max_length=200)
+
+
+class CategorizeIn(BaseModel):
+    items: list[CategorizeItem] = Field(min_length=1, max_length=60)
+
+
+class ColumnSample(BaseModel):
+    """Kolumna pliku z historią transakcji: numer, nagłówek i kilka przykładowych wartości."""
+
+    index: int = Field(ge=0, le=200)
+    header: str = Field(max_length=80)
+    samples: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=5)
+
+
+class MapColumnsIn(BaseModel):
+    columns: list[ColumnSample] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def _unique_indexes(self):
+        if len({c.index for c in self.columns}) != len(self.columns):
+            raise ValueError("Numery kolumn muszą być różne")
+        return self

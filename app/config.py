@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_api_per_minute: int = 300
     rate_limit_auth_per_minute: int = 20
+    rate_limit_ai_per_minute: int = 20  # prośby o podpowiedź Jev z jednego adresu IP
     login_max_failures: int = 5
     login_lock_seconds: int = 900
     # sesja w cookie: SameSite=lax przy froncie i API na tej samej stronie (site); przy różnych domenach "none"
@@ -47,6 +48,11 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None  # brak = włączone poza trybem DEBUG
     cookie_domain: str | None = None
     trust_proxy: bool = False  # True tylko za zaufanym reverse proxy (adres z X-Forwarded-For)
+    # Jev (TypeSafe AI): klucz tylko w backendzie; adres może wskazywać proxy LiteLLM (http://litellm:4000/typesafe)
+    typesafe_api_key: str = ""
+    typesafe_base_url: str = "https://api.typesafe.ai"
+    typesafe_model: str = "jev-latest"
+    typesafe_timeout_seconds: float = 15.0
     # przełączniki funkcji: lista po przecinku, np. "reports,tags=false" (sama nazwa = włączona)
     feature_flags: str = ""
 
@@ -73,6 +79,8 @@ class Settings(BaseSettings):
             problems.append("COOKIE_SAMESITE musi mieć wartość lax, strict albo none")
         elif self.cookie_samesite.lower() == "none" and not self.effective_cookie_secure:
             problems.append("COOKIE_SAMESITE=none wymaga COOKIE_SECURE=true")
+        if not self.typesafe_base_url.lower().startswith(("https://", "http://")):
+            problems.append("TYPESAFE_BASE_URL musi zaczynać się od https:// albo http://")
         invalid = parse_feature_flags(self.feature_flags)[1]
         if invalid:
             problems.append(f"FEATURE_FLAGS zawiera niepoprawne wpisy: {', '.join(invalid)}")
