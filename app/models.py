@@ -143,7 +143,8 @@ class Expense(Base):
     amount: Mapped[float] = mapped_column(Money)
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
     spent_on: Mapped[date] = mapped_column(Date, index=True)
-    # pochodzenie wpisu: RECURRING (szablon stałego wydatku) lub LOAN (opłacona rata); brak = wpis ręczny
+    # pochodzenie wpisu: RECURRING (stały wydatek), LOAN (opłacona rata), IMPORT (wyciąg z banku),
+    # WISH (zakup z listy życzeń), GOAL (wpłata na cel); brak = wpis ręczny
     source_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
