@@ -8,6 +8,7 @@ Wyniki wynikają z założeń użytkownika (procenty i wydatki) i nie są porad�
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -37,13 +38,19 @@ class BudgetPlan:
     monthly_loans: float = 0.0
     loans_count: int = 0
     last_installment_in_months: int = 0
+    # niewykorzystane środki przeniesione z poprzednich miesięcy (tylko kategorie z włączoną opcją)
+    rollover: dict[Category, float] = field(default_factory=lambda: {c: 0.0 for c in CATEGORIES})
 
     def effective_spent(self, category: Category) -> float:
         extra = self.monthly_loans if category == Category.NEEDS else 0.0
         return rnd(self.spent[category] + extra, 2)
 
-    def category_budget(self, category: Category) -> float:
+    def base_budget(self, category: Category) -> float:
+        """Budżet kategorii z samego podziału dochodu, bez środków przeniesionych."""
         return rnd(self.monthly_income * self.percentages[category] / 100, 2)
+
+    def category_budget(self, category: Category) -> float:
+        return rnd(self.base_budget(category) + self.rollover.get(category, 0.0), 2)
 
     def available(self, category: Category) -> float:
         return rnd(self.category_budget(category) - self.effective_spent(category), 2)
@@ -51,6 +58,18 @@ class BudgetPlan:
     @property
     def total_spent(self) -> float:
         return rnd(sum(self.spent.values()) + self.monthly_loans, 2)
+
+
+def rollover_amount(budget: float, spent_by_month: Iterable[float]) -> float:
+    """Kwota przeniesiona na kolejny miesiąc po serii pełnych miesięcy (od najstarszego).
+
+    Niewykorzystana część budżetu przechodzi dalej, przekroczenie nie tworzy długu (minimum 0),
+    a przeniesienie nie przekracza jednego miesięcznego budżetu kategorii.
+    """
+    carry = 0.0
+    for spent in spent_by_month:
+        carry = min(budget, max(0.0, budget + carry - spent))
+    return rnd(carry, 2)
 
 
 @dataclass(frozen=True)

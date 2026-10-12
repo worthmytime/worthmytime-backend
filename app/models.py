@@ -125,6 +125,11 @@ class Budget(Base):
     spent_fun: Mapped[float] = mapped_column(Money, default=0.0)
     # miesiąc (YYYY-MM), którego dotyczą ręczne kwoty spent_*; po zmianie miesiąca wygasają
     spent_period: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # przenoszenie niewykorzystanych środków: miesiąc (YYYY-MM) włączenia opcji w kategorii; brak = wyłączone
+    rollover_since_needs: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    rollover_since_future: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    rollover_since_goals: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    rollover_since_fun: Mapped[str | None] = mapped_column(String(7), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 class Expense(Base):
@@ -138,7 +143,8 @@ class Expense(Base):
     amount: Mapped[float] = mapped_column(Money)
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
     spent_on: Mapped[date] = mapped_column(Date, index=True)
-    # pochodzenie wpisu: RECURRING (szablon stałego wydatku) lub LOAN (opłacona rata); brak = wpis ręczny
+    # pochodzenie wpisu: RECURRING (stały wydatek), LOAN (opłacona rata), IMPORT (wyciąg z banku),
+    # WISH (zakup z listy życzeń), GOAL (wpłata na cel); brak = wpis ręczny
     source_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -223,3 +229,16 @@ class SavingsGoal(Base):
     target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GoalDeposit(Base):
+    """Wpłata na cel (kwota dodatnia) albo wypłata (ujemna); suma wpłat celu równa się jego saved_amount."""
+
+    __tablename__ = "goal_deposits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("savings_goals.id", ondelete="CASCADE"), index=True)
+    amount: Mapped[float] = mapped_column(Money)
+    deposited_on: Mapped[date] = mapped_column(Date, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

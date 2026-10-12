@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 
 from sanic import Blueprint, Request
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from . import calc
@@ -20,7 +20,16 @@ from .helpers import (
     rate_from_user,
     today,
 )
-from .models import BudgetLoan, Expense, ExpenseTemplate, RecurringExpense, SavingsGoal, User, WishlistItem
+from .models import (
+    BudgetLoan,
+    Expense,
+    ExpenseTemplate,
+    GoalDeposit,
+    RecurringExpense,
+    SavingsGoal,
+    User,
+    WishlistItem,
+)
 from .money import rnd
 from .planning import (
     goal_view,
@@ -430,6 +439,11 @@ def _wish(item: WishlistItem, rate: calc.WorkRate) -> dict:
     }
 
 
+def _linked_expenses(user: User, source_type: str, source_ids: list[str]):
+    """Wpisy w rejestrze utworzone przez inny moduł (zakup z listy życzeń, wpłata na cel)."""
+    return (Expense.user_id == user.id, Expense.source_type == source_type, Expense.source_id.in_(source_ids))
+
+
 async def _wishlist_payload(request: Request, user: User) -> dict:
     rate = rate_from_user(user)
     rows = await request.ctx.db.scalars(
@@ -474,6 +488,33 @@ async def decide_wish(request: Request, item_id: str):
         raise ApiError("Decyzja została już podjęta", 409)
     item.status = data.decision
     item.decided_at = _now()
+    expense = None
+    if data.decision == "BOUGHT" and data.add_expense:
+        category = data.category.value if data.category else item.category
+        expense = Expense(
+            user_id=user.id,
+            category=category or Category.FUN.value,  # pozycja bez kategorii: zakup z listy życzeń to Przyjemności
+            amount=item.price,
+            note=item.name,
+            spent_on=today(),
+            source_type="WISH",
+            source_id=item.id,
+        )
+        request.ctx.db.add(expense)
+    await request.ctx.db.commit()
+    return ok({**_wish(item, rate_from_user(user)), "expense": _expense(expense) if expense else None})
+
+
+@bp.delete("/wishlist/<item_id:str>/decision")
+@login_required
+async def undo_wish_decision(request: Request, item_id: str):
+    """Cofa decyzję: pozycja wraca do oczekujących, a wydatek dopisany przy zakupie znika z rejestru."""
+    user = request.ctx.user
+    item = await _own(request, WishlistItem, item_id, user, "pozycji listy życzeń")
+    if item.status == "WAITING":
+        raise ApiError("Ta pozycja nie ma jeszcze decyzji", 409)
+    item.status, item.decided_at = "WAITING", None
+    await request.ctx.db.execute(delete(Expense).where(*_linked_expenses(user, "WISH", [item.id])))
     await request.ctx.db.commit()
     return ok(_wish(item, rate_from_user(user)))
 
@@ -556,6 +597,16 @@ def _hourly_rate(user: User) -> float | None:
     return rate_from_user(user).hourly_rate
 
 
+def _record_deposit(request: Request, g: SavingsGoal, amount: float) -> GoalDeposit | None:
+    """Zapisuje w historii zmianę odłożonej kwoty (dodatnia = wpłata, ujemna = wypłata) z dzisiejszą datą."""
+    amount = rnd(amount, 2)
+    if amount == 0:
+        return None
+    d = GoalDeposit(user_id=g.user_id, goal_id=g.id, amount=amount, deposited_on=today())
+    request.ctx.db.add(d)
+    return d
+
+
 def _sync_completion(g: SavingsGoal) -> None:
     done = g.saved_amount >= g.target_amount
     if done and g.completed_at is None:
@@ -587,6 +638,8 @@ async def add_goal(request: Request):
     g = SavingsGoal(user_id=user.id, **data.model_dump())
     _sync_completion(g)
     request.ctx.db.add(g)
+    await request.ctx.db.flush()  # cel dostaje id, którego potrzebuje wpis w historii
+    _record_deposit(request, g, g.saved_amount)  # kwota odłożona już przy tworzeniu celu
     await request.ctx.db.commit()
     return ok(await _single_goal(request, user, g), 201)
 
@@ -597,8 +650,10 @@ async def update_goal(request: Request, goal_id: str):
     data = parse(GoalIn, request)
     user = request.ctx.user
     g = await _own(request, SavingsGoal, goal_id, user, "celu")
+    before = g.saved_amount
     for key, value in data.model_dump().items():
         setattr(g, key, value)
+    _record_deposit(request, g, g.saved_amount - before)  # ręczna korekta kwoty też trafia do historii
     _sync_completion(g)
     await request.ctx.db.commit()
     return ok(await _single_goal(request, user, g))
@@ -613,7 +668,63 @@ async def deposit(request: Request, goal_id: str):
     if g.saved_amount + data.amount < 0:
         raise ApiError("Nie można wypłacić więcej, niż odłożono", 422)
     g.saved_amount = rnd(g.saved_amount + data.amount, 2)
+    d = _record_deposit(request, g, data.amount)
     _sync_completion(g)
+    if d is not None and d.amount > 0 and data.add_expense:
+        await request.ctx.db.flush()  # wpłata dostaje id, którym wiążemy z nią wpis w rejestrze
+        request.ctx.db.add(
+            Expense(
+                user_id=user.id,
+                category=g.category or Category.FUTURE.value,  # cel bez kategorii: odkładanie to Przyszłość
+                amount=d.amount,
+                note=f"Cel: {g.name}"[:200],
+                spent_on=d.deposited_on,
+                source_type="GOAL",
+                source_id=d.id,
+            )
+        )
+    await request.ctx.db.commit()
+    return ok(await _single_goal(request, user, g))
+
+
+@bp.get("/goals/<goal_id:str>/deposits")
+@login_required
+async def list_goal_deposits(request: Request, goal_id: str):
+    """Historia wpłat i wypłat celu, od najnowszych."""
+    g = await _own(request, SavingsGoal, goal_id, request.ctx.user, "celu")
+    rows = await request.ctx.db.scalars(
+        select(GoalDeposit)
+        .where(GoalDeposit.goal_id == g.id)
+        .order_by(GoalDeposit.deposited_on.desc(), GoalDeposit.created_at.desc(), GoalDeposit.id)
+    )
+    deposits = list(rows)
+    linked = set(
+        await request.ctx.db.scalars(
+            select(Expense.source_id).where(*_linked_expenses(request.ctx.user, "GOAL", [d.id for d in deposits]))
+        )
+    )
+    items = [
+        {"id": d.id, "amount": d.amount, "deposited_on": d.deposited_on.isoformat(), "in_ledger": d.id in linked}
+        for d in deposits
+    ]
+    return ok({"items": items, "total": rnd(sum(d["amount"] for d in items), 2)})
+
+
+@bp.delete("/goals/<goal_id:str>/deposits/<deposit_id:str>")
+@login_required
+async def undo_goal_deposit(request: Request, goal_id: str, deposit_id: str):
+    """Cofa wpłatę (albo wypłatę): odłożona kwota wraca do stanu sprzed niej, a powiązany wydatek znika z rejestru."""
+    user = request.ctx.user
+    g = await _own(request, SavingsGoal, goal_id, user, "celu")
+    d = await request.ctx.db.get(GoalDeposit, deposit_id)
+    if d is None or d.goal_id != g.id:
+        raise ApiError("Nie znaleziono: wpłaty", 404)
+    if g.saved_amount - d.amount < 0:
+        raise ApiError("Nie można cofnąć tej wpłaty: część pieniędzy została już wypłacona", 409)
+    g.saved_amount = rnd(g.saved_amount - d.amount, 2)
+    _sync_completion(g)
+    await request.ctx.db.execute(delete(Expense).where(*_linked_expenses(user, "GOAL", [d.id])))
+    await request.ctx.db.delete(d)
     await request.ctx.db.commit()
     return ok(await _single_goal(request, user, g))
 
@@ -622,6 +733,8 @@ async def deposit(request: Request, goal_id: str):
 @login_required
 async def delete_goal(request: Request, goal_id: str):
     g = await _own(request, SavingsGoal, goal_id, request.ctx.user, "celu")
+    # historia znika razem z celem; wpisy w rejestrze zostają (pieniądze faktycznie zeszły z budżetu)
+    await request.ctx.db.execute(delete(GoalDeposit).where(GoalDeposit.goal_id == g.id))
     await request.ctx.db.delete(g)
     await request.ctx.db.commit()
     return ok({"deleted": True})

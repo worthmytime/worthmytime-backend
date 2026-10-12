@@ -26,6 +26,7 @@ TAGS = [
     ("Profil i budżet", "Stawka, plan budżetu, kredyty, prognoza i alerty."),
     ("Wydatki", "Rejestr wydatków, stałe wydatki i szablony szybkich wpisów."),
     ("Życzenia i cele", "Lista życzeń z okresem ostygnięcia oraz cele oszczędnościowe."),
+    ("Raporty", "Podsumowanie miesiąca i eksport danych użytkownika."),
 ]
 
 # --- schematy odpowiedzi (opisowe; API zwraca zwykłe słowniki JSON) -----------------------------------------
@@ -65,6 +66,7 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
     ),
     "Deleted": _obj({"deleted": {"type": "boolean"}}, ["deleted"]),
     "Health": _obj({"status": {"enum": ["ok", "unavailable"]}, "database": {"enum": ["up", "down"]}}, ["status"]),
+    "Features": _obj({"features": {"type": "object", "additionalProperties": {"type": "boolean"}}}, ["features"]),
     "Profile": _obj(
         {
             "currency": _str,
@@ -155,8 +157,10 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
         {
             "percentages": _obj({c: _num for c in ("NEEDS", "FUTURE", "GOALS", "FUN")}),
             "spent": _obj({c: _num for c in ("NEEDS", "FUTURE", "GOALS", "FUN")}),
-            "amounts": {"type": ["object", "null"]},
+            "amounts": {"type": ["object", "null"], "description": "budżet kategorii razem ze środkami przeniesionymi"},
             "available": {"type": ["object", "null"]},
+            "rollover": _obj({c: {"type": "boolean"} for c in ("NEEDS", "FUTURE", "GOALS", "FUN")}),
+            "rollover_amounts": _obj({c: _num for c in ("NEEDS", "FUTURE", "GOALS", "FUN")}),
             "loans": {"type": "array", "items": _obj({"id": _str, "name": _str, "installment_amount": _num})},
             "monthly_loans": _num,
             "monthly_income": _nullable_num,
@@ -164,6 +168,38 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
             "is_custom": {"type": "boolean"},
         },
         ["percentages"],
+    ),
+    "MonthReport": _obj(
+        {
+            "month": _str,
+            "previous_month": _str,
+            "currency": _str,
+            "monthly_income": _num,
+            "categories": {
+                "type": "array",
+                "items": _obj(
+                    {
+                        "category": _str,
+                        "budget": _num,
+                        "spent": _num,
+                        "available": _num,
+                        "usage_percent": _nullable_num,
+                        "previous": _num,
+                        "change": _num,
+                        "change_percent": _nullable_num,
+                    }
+                ),
+            },
+            "total_spent": _num,
+            "previous": {"type": "number", "description": "wydatki łącznie w poprzednim miesiącu"},
+            "change": _num,
+            "change_percent": _nullable_num,
+            "saved": _obj({"future": _num, "unspent": _num, "goals": _num}),
+            "discretionary": _obj({"spent": _num, "work_hours": _nullable_num}),
+            "largest_expense": {"type": ["object", "null"]},
+            "entries": {"type": "integer"},
+        },
+        ["month", "categories", "total_spent"],
     ),
     "Forecast": _obj(
         {
@@ -196,7 +232,7 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
             "amount": _num,
             "note": {"type": ["string", "null"]},
             "spent_on": {"type": "string", "format": "date"},
-            "source_type": {"enum": ["RECURRING", "LOAN", "IMPORT", None], "description": "pochodzenie wpisu; brak = ręczny"},
+            "source_type": {"enum": ["RECURRING", "LOAN", "IMPORT", "WISH", "GOAL", None], "description": "pochodzenie wpisu; brak = ręczny"},
             "source_id": {"type": ["string", "null"]},
         },
         ["id", "category", "amount", "spent_on"],
@@ -256,6 +292,11 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
         ["id", "name", "target_amount", "saved_amount"],
     ),
     "GoalList": _list_of("Goal", currency=_str),
+    "GoalDeposit": _obj(
+        {"id": _str, "amount": _num, "deposited_on": {"type": "string", "format": "date"}, "in_ledger": {"type": "boolean"}},
+        ["id", "amount", "deposited_on"],
+    ),
+    "GoalDepositList": _list_of("GoalDeposit", total=_num),
     "Alert": _obj(
         {
             "key": _str,
@@ -325,6 +366,8 @@ OPERATIONS: list[dict] = [
     _op("GET", "/health", "health", "System", "Stan usługi i bazy danych", (200, "Usługa działa", "Health"), auth=False,
         description="Nie podlega limitom żądań (używany przez monitoring). `503`, gdy baza nie odpowiada.",
         extra={503: "Baza danych niedostępna"}),
+    _op("GET", "/features", "features", "System", "Przełączniki funkcji (feature flags)", (200, "Flagi z konfiguracji", "Features"),
+        auth=False, description="Flagi ze zmiennej `FEATURE_FLAGS`. Funkcja, której nie ma na liście, jest wyłączona."),
     _op("GET", "/openapi.json", "openapi_json", "System", "Specyfikacja OpenAPI 3.1 (JSON)", (200, "Specyfikacja", None),
         auth=False),
     _op("GET", "/docs", "swagger_ui", "System", "Dokumentacja interaktywna (Swagger UI)", (200, "Strona HTML", None), auth=False,
@@ -388,7 +431,8 @@ OPERATIONS: list[dict] = [
     _op("GET", "/budget", "get_budget", "Profil i budżet", "Plan budżetu z wykorzystaniem kategorii i kredytami",
         (200, "Budżet", "Budget")),
     _op("PUT", "/budget", "put_budget", "Profil i budżet", "Zapis planu budżetu i kredytów", (200, "Budżet", "Budget"),
-        body=s.BudgetIn, description="Procenty kategorii muszą sumować się do 100. Zapis tworzy raty od nowa (nowe identyfikatory)."),
+        body=s.BudgetIn, description="Procenty kategorii muszą sumować się do 100. Zapis tworzy raty od nowa (nowe identyfikatory). "
+        "`rollover` włącza przenoszenie niewykorzystanych środków kategorii na kolejny miesiąc; pominięte pole zostawia ustawienie bez zmian."),
     _op("GET", "/budget/forecast", "budget_forecast", "Profil i budżet", "Dzienny limit i prognoza końca miesiąca",
         (200, "Prognoza kategorii", "Forecast"), extra={409: "Brak dochodu lub stawki w profilu"}),
     _op("POST", "/budget/loans/{loan_id}/pay", "pay_loan_installment", "Profil i budżet",
@@ -438,12 +482,37 @@ OPERATIONS: list[dict] = [
     _op("DELETE", "/wishlist/{item_id}", "delete_wish", "Życzenia i cele", "Usunięcie pozycji", (200, "Usunięto", "Deleted")),
     _op("POST", "/wishlist/{item_id}/decision", "decide_wish", "Życzenia i cele", "Decyzja: kupuję lub odpuszczam",
         (200, "Pozycja po decyzji", "Wish"), body=s.DecisionIn, extra={409: "Decyzja została już podjęta"}),
+    _op("DELETE", "/wishlist/{item_id}/decision", "undo_wish_decision", "Życzenia i cele", "Cofnięcie decyzji",
+        (200, "Pozycja znów oczekuje", "Wish"), description="Usuwa też wydatek dopisany do rejestru przy zakupie.",
+        extra={409: "Pozycja nie ma jeszcze decyzji"}),
     _op("GET", "/goals", "list_goals", "Życzenia i cele", "Cele oszczędnościowe", (200, "Cele", "GoalList")),
     _op("POST", "/goals", "add_goal", "Życzenia i cele", "Dodanie celu", (201, "Cel", "Goal"), body=s.GoalIn),
     _op("PUT", "/goals/{goal_id}", "update_goal", "Życzenia i cele", "Zmiana celu", (200, "Cel", "Goal"), body=s.GoalIn),
     _op("DELETE", "/goals/{goal_id}", "delete_goal", "Życzenia i cele", "Usunięcie celu", (200, "Usunięto", "Deleted")),
     _op("POST", "/goals/{goal_id}/deposit", "deposit", "Życzenia i cele", "Wpłata na cel (lub wypłata, gdy ujemna)",
         (200, "Cel po wpłacie", "Goal"), body=s.DepositIn),
+    _op("DELETE", "/goals/{goal_id}/deposits/{deposit_id}", "undo_goal_deposit", "Życzenia i cele", "Cofnięcie wpłaty na cel",
+        (200, "Cel po cofnięciu wpłaty", "Goal"), description="Odejmuje wpłatę od odłożonej kwoty i usuwa powiązany wydatek z rejestru.",
+        extra={409: "Część wpłaty została już wypłacona"}),
+    _op("GET", "/goals/{goal_id}/deposits", "list_goal_deposits", "Życzenia i cele", "Historia wpłat celu",
+        (200, "Wpłaty i wypłaty od najnowszych", "GoalDepositList"),
+        description="Kwota dodatnia to wpłata, ujemna to wypłata. Suma (`total`) równa się odłożonej kwocie celu."),
+    # Raporty
+    _op("GET", "/reports/month", "month_summary", "Raporty", "Podsumowanie miesiąca", (200, "Liczby miesiąca", "MonthReport"),
+        query=[_q("month", "Miesiąc w formacie YYYY-MM (domyślnie bieżący)")],
+        description="Wydatki kontra budżet per kategoria, odłożone (wpisy w Przyszłości) i niewydane, godziny pracy poświęcone na "
+        "wydatki uznaniowe (Cele i Przyjemności), największy wydatek i porównanie z poprzednim miesiącem. Budżet minionych miesięcy "
+        "liczony jest z dzisiejszego dochodu, podziału i rat.",
+        extra={409: "Brak dochodu lub stawki w profilu"}),
+    _op("GET", "/export", "export_data", "Raporty", "Eksport danych użytkownika (JSON albo CSV)", (200, "Plik do pobrania", None),
+        query=[
+            _q("format", "Format pliku (domyślnie json)", {"enum": ["json", "csv"]}),
+            _q("from", "Początek zakresu, YYYY-MM-DD (domyślnie bez ograniczenia)", {"type": "string", "format": "date"}),
+            _q("to", "Koniec zakresu włącznie, YYYY-MM-DD (domyślnie bez ograniczenia)", {"type": "string", "format": "date"}),
+        ],
+        description="Wydatki, cele, lista życzeń i zapisane obliczenia. CSV to jedna tabela z typem wiersza w kolumnie `type` "
+        "(UTF-8 z BOM); JSON zawiera pełne dane. Odpowiedź ma nagłówek `Content-Disposition: attachment`. "
+        "Zakres `from`/`to` dotyczy daty wydatku, a dla celów, życzeń i obliczeń daty utworzenia."),
 ]
 
 _JSON = "application/json"

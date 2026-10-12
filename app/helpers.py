@@ -9,14 +9,21 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from . import calc
-from .budget import BudgetPlan, analyze, loan_view
+from .budget import BudgetPlan, analyze, loan_view, rollover_amount
 from .config import settings
 from .errors import ApiError
 from .models import Budget, BudgetLoan, Calculation, Cost, Expense, RecurringExpense, User
 from .money import rnd
-from .planning import month_bounds, period_of, remaining_installments, totals_by_category
+from .planning import (
+    last_periods,
+    month_bounds,
+    monthly_summary,
+    period_of,
+    remaining_installments,
+    totals_by_category,
+)
 from .recurring import due_dates
-from .schemas import CATEGORIES, BudgetIn, CalculationIn, CostIn, LoanIn, ProfileIn
+from .schemas import CATEGORIES, BudgetIn, CalculationIn, Category, CostIn, LoanIn, ProfileIn
 from .security import decode_token
 from .session import SAFE_METHODS, csrf_valid, session_token
 
@@ -46,8 +53,8 @@ def parse(model: type[M], request: Request) -> M:
         raise ApiError("Błąd walidacji danych", 422, errors) from e
 
 
-def ok(data, status: int = 200):
-    return json_response(data, status=status)
+def ok(data, status: int = 200, headers: dict | None = None):
+    return json_response(data, status=status, headers=headers)
 
 
 async def current_user(request: Request) -> User | None:
@@ -217,6 +224,7 @@ def plan_from_row(
     loans: list[BudgetLoan] | None = None,
     ledger: dict[str, float] | None = None,
     period: str | None = None,
+    rollover: dict[Category, float] | None = None,
 ) -> BudgetPlan:
     """Wydane w kategorii = suma wpisów z rejestru wydatków w bieżącym miesiącu (jedyne źródło "wydane")."""
     loans = loans or []
@@ -230,8 +238,58 @@ def plan_from_row(
         percentages={c: getattr(row, f"pct_{c.value.lower()}") for c in CATEGORIES},
         spent=spent,
         is_custom=True,
+        rollover=rollover or {c: 0.0 for c in CATEGORIES},
         **_loan_totals(loans),
     )
+
+
+# przeniesienie liczymy najwyżej z tylu pełnych miesięcy wstecz
+ROLLOVER_LOOKBACK_MONTHS = 12
+
+
+def _rollover_since(row: Budget | None, category: Category) -> str | None:
+    return getattr(row, f"rollover_since_{category.value.lower()}") if row is not None else None
+
+
+def apply_rollover(row: Budget, flags: dict[Category, bool]) -> None:
+    """Włączenie opcji zapamiętuje bieżący miesiąc jako początek liczenia, wyłączenie go kasuje."""
+    period = period_of(today())
+    for c in CATEGORIES:
+        attr = f"rollover_since_{c.value.lower()}"
+        if not flags.get(c, False):
+            setattr(row, attr, None)
+        elif getattr(row, attr) is None:
+            setattr(row, attr, period)
+
+
+async def load_rollover(
+    request: Request, user: User, row: Budget | None, monthly_income: float | None, loans: list[BudgetLoan]
+) -> dict[Category, float]:
+    """Środki przeniesione na bieżący miesiąc w kategoriach z włączoną opcją (zasady w README)."""
+    out = {c: 0.0 for c in CATEGORIES}
+    now = today()
+    current = period_of(now)
+    # miesiąc włączenia liczy się jako pierwszy; przeniesienie pojawia się dopiero po jego zakończeniu
+    active = {c: s for c in CATEGORIES if (s := _rollover_since(row, c)) and s < current}
+    if not active or not monthly_income:
+        return out
+    periods = last_periods(now, ROLLOVER_LOOKBACK_MONTHS + 1)[:-1]  # pełne miesiące przed bieżącym
+    first = max(min(active.values()), periods[0])
+    start, _ = month_bounds(first)
+    end, _ = month_bounds(current)
+    rows = await request.ctx.db.execute(
+        select(Expense.spent_on, Expense.category, Expense.amount).where(
+            Expense.user_id == user.id, Expense.spent_on >= start, Expense.spent_on < end, NOT_LOAN_PAYMENT
+        )
+    )
+    history = monthly_summary(rows.all(), [p for p in periods if p >= first])
+    # budżet minionych miesięcy liczymy z dzisiejszego dochodu, podziału i rat (historii planu nie przechowujemy)
+    base = plan_from_row(row, monthly_income, loans)
+    for c, since in active.items():
+        fixed = base.monthly_loans if c == Category.NEEDS else 0.0
+        spent = [m["totals"][c.value] + fixed for m in history if m["month"] >= since]
+        out[c] = rollover_amount(base.base_budget(c), spent)
+    return out
 
 
 async def load_loans(request: Request, user: User) -> list[BudgetLoan]:
@@ -302,13 +360,26 @@ async def materialize_recurring(request: Request, user: User) -> int:
 
 async def load_plan(request: Request, user: User, monthly_income: float) -> BudgetPlan:
     period = period_of(today())
-    return plan_from_row(
-        await request.ctx.db.get(Budget, user.id),
-        monthly_income,
-        await load_loans(request, user),
-        await load_ledger(request, user, period),
-        period,
-    )
+    row = await request.ctx.db.get(Budget, user.id)
+    loans = await load_loans(request, user)
+    ledger = await load_ledger(request, user, period)  # dopisuje też zaległe stałe wydatki, więc przed przeniesieniem
+    rollover = await load_rollover(request, user, row, monthly_income, loans)
+    return plan_from_row(row, monthly_income, loans, ledger, period, rollover)
+
+
+async def budget_view(
+    request: Request,
+    user: User,
+    row: Budget | None,
+    loans: list[BudgetLoan],
+    monthly_income: float | None,
+    hourly_rate: float | None,
+) -> dict:
+    """Budżet bieżącego miesiąca do odpowiedzi API: rejestr wydatków i środki przeniesione z poprzednich miesięcy."""
+    period = period_of(today())
+    ledger = await load_ledger(request, user, period)
+    rollover = await load_rollover(request, user, row, monthly_income, loans)
+    return serialize_budget(row, monthly_income, loans, hourly_rate, ledger, period, rollover)
 
 
 def serialize_budget(
@@ -318,10 +389,11 @@ def serialize_budget(
     hourly_rate: float | None = None,
     ledger: dict[str, float] | None = None,
     period: str | None = None,
+    rollover: dict[Category, float] | None = None,
 ) -> dict:
     loans = loans or []
     ledger = ledger or {}
-    plan = plan_from_row(row, monthly_income or 0.0, loans, ledger, period)
+    plan = plan_from_row(row, monthly_income or 0.0, loans, ledger, period, rollover)
     return {
         "loans": [
             {
@@ -347,7 +419,10 @@ def serialize_budget(
         "percentages": {c.value: plan.percentages[c] for c in CATEGORIES},
         # wydane w kategoriach pochodzą wyłącznie z rejestru wydatków (bieżący miesiąc)
         "spent": {c.value: plan.spent[c] for c in CATEGORIES},
+        # budżet kategorii razem ze środkami przeniesionymi z poprzednich miesięcy
         "amounts": {c.value: plan.category_budget(c) for c in CATEGORIES} if monthly_income else None,
+        "rollover": {c.value: _rollover_since(row, c) is not None for c in CATEGORIES},
+        "rollover_amounts": {c.value: plan.rollover[c] for c in CATEGORIES},
         "available": {c.value: plan.available(c) for c in CATEGORIES} if monthly_income else None,
         "monthly_income": rnd(monthly_income, 2) if monthly_income else None,
         "total_spent": plan.total_spent,

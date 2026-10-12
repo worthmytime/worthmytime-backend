@@ -71,9 +71,21 @@ Kontener wykonuje `alembic upgrade head` przy każdym starcie.
 | `LOGIN_MAX_FAILURES` / `LOGIN_LOCK_SECONDS` | po tylu nieudanych logowaniach na konto z jednego IP (5) blokada na tyle sekund (900) |
 | `TRUST_PROXY` | `true` tylko za zaufanym reverse proxy: adres klienta z `X-Forwarded-For` |
 | `COOKIE_SAMESITE` / `COOKIE_SECURE` / `COOKIE_DOMAIN` | cookie sesji (`wmt_session`, HttpOnly): `lax` przy froncie i API na tej samej stronie, `none` przy różnych domenach (wymaga HTTPS); `COOKIE_SECURE` domyślnie włączone poza `DEBUG` |
+| `FEATURE_FLAGS` | przełączniki funkcji po przecinku, np. `reports,tags=false` (patrz niżej) |
 | `PORT` | domyślnie 8001 (w kontenerze 8000) |
 
 Pełny stack (db + api + web): `docker compose up --build` w katalogu nadrzędnym (wymaga `JWT_SECRET`).
+
+## Przełączniki funkcji (feature flags)
+
+Nowy moduł można wdrożyć wyłączony i włączyć później samą zmianą konfiguracji. Flagi ustawia zmienna `FEATURE_FLAGS`, a aplikacja czyta ją przy starcie, więc po zmianie wystarczy restart kontenera (bez nowego obrazu).
+
+- Format: nazwy po przecinku, np. `FEATURE_FLAGS=reports,tags=false`. Sama nazwa oznacza flagę włączoną; wartości to `true`/`false`, `1`/`0`, `on`/`off`.
+- Nazwa: małe litery, cyfry, `_` i `-`, do 40 znaków. Niepoprawny wpis jest pomijany, a przy `DEBUG=false` aplikacja z nim nie wystartuje.
+- Odczyt: `GET /api/v1/features` (bez logowania) zwraca `{"features": {"reports": true, "tags": false}}`. Flagi, której nie ma w odpowiedzi, frontend traktuje jak wyłączoną.
+- W kodzie backendu: `settings.feature_flag_map.get("reports", False)`.
+
+Flagi są jawne (endpoint jest publiczny), więc nie nadają się do ukrywania czegokolwiek poufnego.
 
 ## Kopie zapasowe i monitoring
 
@@ -82,6 +94,19 @@ Skrypty kopii zapasowej, test odtworzenia i monitoring `/health`: [ops/README.md
 ## Kwoty i zaokrąglenia
 
 Zaokrąglamy w jednym miejscu (`app/money.py`): **ROUND_HALF_UP** na zapisie dziesiętnym (2,675 daje 2,68, a 2,5 daje 3; wbudowane `round()` zaokrągla do parzystej i myli się na liczbach binarnych). Kwoty w bazie to `NUMERIC(14,2)`, stawka godzinowa `NUMERIC(14,4)`; w API nadal są zwykłymi liczbami JSON. Kwoty z żądań są zaokrąglane do groszy przed walidacją.
+
+## Przenoszenie środków (rollover)
+
+Dla każdej kategorii budżetu można włączyć przenoszenie niewykorzystanych środków na kolejny miesiąc (`PUT /budget`, pole `rollover`, np. `{"FUN": true}`; pominięte pole zostawia ustawienie bez zmian). `GET /budget` zwraca `rollover` (włączone kategorie) i `rollover_amounts` (kwoty przeniesione na bieżący miesiąc), a `amounts` i `available` już je uwzględniają, tak samo jak prognoza, alerty i analiza zakupu.
+
+Sposób liczenia (`rollover_amount` w `app/budget.py`):
+
+- Liczymy od miesiąca włączenia opcji. W tym miesiącu przeniesienie wynosi 0, pierwsza kwota pojawia się w następnym.
+- Po każdym pełnym miesiącu: `przeniesienie = budżet + poprzednie przeniesienie - wydane`, czyli niewykorzystane środki kumulują się z miesiąca na miesiąc.
+- **Przekroczenie nie przechodzi na minus.** Wydanie ponad budżet zeruje przeniesienie, ale nie pomniejsza budżetu kolejnego miesiąca.
+- **Limit:** przeniesienie nie przekracza jednego miesięcznego budżetu kategorii, więc budżet miesiąca jest najwyżej podwojony.
+- Wstecz sięgamy najwyżej 12 pełnych miesięcy. Wyłączenie opcji kasuje przeniesienie; ponowne włączenie liczy od nowa.
+- Budżet minionych miesięcy liczymy z **dzisiejszego** dochodu, podziału procentowego i rat (historii planu nie przechowujemy). W Potrzebach raty kredytów liczą się jako wydane w każdym miesiącu.
 
 ## Sesja w cookie i CSRF
 
