@@ -194,10 +194,18 @@ def _strip_income_percent(result: dict) -> None:
 
 
 def _loan_totals(loans: list[LoanIn] | list[BudgetLoan]) -> dict:
-    """Sumy rat aktywnych kredytów; spłacone (0 pozostałych rat) nie wchodzą do budżetu."""
+    """Sumy rat kredytów obciążających budżet bieżącego miesiąca; spłacone wcześniej do niego nie wchodzą.
+
+    Rata wymagalna w tym miesiącu liczy się przez cały miesiąc, także po dniu płatności i także wtedy, gdy była
+    ostatnia: inaczej po terminie ostatniej raty budżet miesiąca nagle by ją zgubił.
+    """
     now = today()
-    left = [remaining_installments(now, x.installments_left, x.end_date, x.payment_day) for x in loans]
-    active = [(x.installment_amount, n) for x, n in zip(loans, left, strict=True) if n > 0]
+    month_start = now.replace(day=1)
+    active = [
+        (x.installment_amount, remaining_installments(now, x.installments_left, x.end_date, x.payment_day))
+        for x in loans
+        if remaining_installments(month_start, x.installments_left, x.end_date, x.payment_day) > 0
+    ]
     return {
         "monthly_loans": rnd(sum(a for a, _ in active), 2),
         "loans_count": len(active),

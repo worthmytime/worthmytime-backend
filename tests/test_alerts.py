@@ -40,8 +40,15 @@ def test_budget_deficit_when_spending_exceeds_income():
     assert rules.rule_budget_deficit(_plan(income=0, loans=500)) == []
 
 
-def _loan(day, left=True, id_="l1"):
-    return rules.LoanDue(id=id_, name="Kredyt", installment_amount=800, payment_day=day, has_installments_left=left)
+def _loan(day, left=True, id_="l1", due_this_month=False):
+    return rules.LoanDue(
+        id=id_,
+        name="Kredyt",
+        installment_amount=800,
+        payment_day=day,
+        has_installments_left=left,
+        due_this_month=due_this_month,
+    )
 
 
 def test_loan_due_within_three_days_and_not_paid():
@@ -170,3 +177,48 @@ def test_dismiss_accepts_percent_encoded_key(client):
     _, res = client.post("/api/v1/alerts/CATEGORY_USAGE%3AFUN/dismiss", headers=auth)  # tak wysyła ją przeglądarka
     assert res.status == 200 and res.json["dismissed"] == "CATEGORY_USAGE:FUN"
     assert client.get("/api/v1/alerts", headers=auth)[1].json["items"] == []
+
+
+def test_overdue_installment_keeps_alerting_until_paid():
+    now = date(2026, 10, 20)
+    overdue = _loan(11, due_this_month=True)
+    (a,) = rules.rule_loan_due([overdue], set(), now)
+    assert (a["level"], a["params"]["days_left"], a["params"]["due_date"]) == ("critical", -9, "2026-10-11")
+    assert a["state"] == "2026-10-11:overdue"
+    # opłacona rata z tego miesiąca wycisza alert; kolejna (11.11) jest jeszcze za daleko
+    assert rules.rule_loan_due([overdue], {("l1", "2026-10")}, now) == []
+
+
+def test_last_installment_of_finished_loan_is_still_overdue_this_month():
+    # ostatnia rata wypadła 11.10: od dziś nie ma już rat, ale ta z bieżącego miesiąca nie jest opłacona
+    finished = _loan(11, left=False, due_this_month=True)
+    (a,) = rules.rule_loan_due([finished], set(), date(2026, 10, 20))
+    assert a["params"]["days_left"] == -9
+    assert rules.rule_loan_due([finished], {("l1", "2026-10")}, date(2026, 10, 20)) == []
+    # w kolejnym miesiącu pożyczka jest już spłacona i nie ma o czym przypominać
+    gone = _loan(11, left=False)
+    assert rules.rule_loan_due([gone], set(), date(2026, 11, 20)) == []
+
+
+def test_budget_runs_out_alert_from_forecast():
+    def row(category, status, runs_out_on, budget, projected):
+        return {
+            "category": category,
+            "status": status,
+            "runs_out_on": runs_out_on,
+            "budget": budget,
+            "projected_total": projected,
+            "daily_limit": 12.5,
+        }
+
+    rows = [
+        row("FUN", "WARN", "2026-10-18", 700, 1100),
+        row("NEEDS", "OVER", None, 3500, 4000),  # przekroczona kategoria ma własny alert
+        row("GOALS", "WARN", None, 1050, 1200),  # przekroczy budżet, ale dopiero po końcu miesiąca
+        row("FUTURE", "OK", None, 1750, 0),
+    ]
+    (a,) = rules.rule_budget_runs_out(rows)
+    assert (a["key"], a["level"], a["state"]) == ("BUDGET_RUNS_OUT:FUN", "warning", "2026-10-18")
+    assert a["params"]["runs_out_on"] == "2026-10-18" and a["link"] == "/budget"
+    # kategoria, która ma już alert o wykorzystaniu budżetu, nie dostaje drugiego
+    assert rules.rule_budget_runs_out(rows, {"FUN"}) == []

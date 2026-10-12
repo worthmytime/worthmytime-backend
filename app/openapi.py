@@ -480,7 +480,9 @@ OPERATIONS: list[dict] = [
         extra={409: "Rata za ten miesiąc jest już opłacona"}),
     _op("GET", "/alerts", "list_alerts", "Profil i budżet", "Centrum alertów", (200, "Aktywne alerty", "AlertList")),
     _op("POST", "/alerts/{key}/dismiss", "dismiss_alert", "Profil i budżet", "Ukryj alert do zmiany jego stanu",
-        (200, "Ukryto", None), description="`key` ma postać `KOD:przedmiot`, np. `CATEGORY_USAGE:FUN` (może być zakodowany procentowo)."),
+        (200, "Ukryto", None), description="`key` ma postać `KOD:przedmiot`, np. `CATEGORY_USAGE:FUN` (może być zakodowany procentowo). "
+        "Kody: `CATEGORY_USAGE`, `BUDGET_DEFICIT`, `BUDGET_RUNS_OUT` (budżet kategorii skończy się przed końcem miesiąca), "
+        "`LOAN_DUE` (także rata po terminie: ujemne `days_left`), alerty celów i listy życzeń."),
     # Wydatki
     _op("GET", "/expenses", "list_expenses", "Wydatki", "Rejestr wydatków z miesiąca", (200, "Wpisy i sumy", "ExpenseList"),
         query=[_q("month", "Miesiąc `YYYY-MM` (domyślnie bieżący)")],

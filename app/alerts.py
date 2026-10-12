@@ -16,7 +16,7 @@ from datetime import date
 
 from .budget import BudgetPlan
 from .money import rnd
-from .planning import next_payment_date
+from .planning import add_months, next_payment_date
 from .schemas import CATEGORIES
 
 INFO, WARNING, CRITICAL = "info", "warning", "critical"
@@ -92,18 +92,40 @@ class LoanDue:
     installment_amount: float
     payment_day: int | None
     has_installments_left: bool
+    # rata tego kredytu była wymagalna w bieżącym miesiącu (liczone od pierwszego dnia miesiąca)
+    due_this_month: bool = False
 
 
 def rule_loan_due(
     loans: Iterable[LoanDue], paid: set[tuple[str, str]], today: date, within_days: int = LOAN_DUE_DAYS
 ) -> list[dict]:
-    """LOAN_DUE: rata przypada w ciągu najbliższych dni (także dziś) i nie jest oznaczona jako opłacona.
+    """LOAN_DUE: rata przypada w ciągu najbliższych dni (także dziś) albo jest po terminie i nie jest opłacona.
 
     paid: pary (id kredytu, miesiąc terminu YYYY-MM) z wpisami o opłaconej racie.
+    Rata po terminie z bieżącego miesiąca ma ujemne `days_left` i poziom krytyczny, dopóki nie zostanie opłacona.
     """
     out = []
     for loan in loans:
-        if not loan.payment_day or not loan.has_installments_left:
+        if not loan.payment_day:
+            continue
+        this_month = add_months(today.replace(day=1), 0, loan.payment_day)
+        if loan.due_this_month and this_month < today and (loan.id, this_month.strftime("%Y-%m")) not in paid:
+            out.append(
+                alert(
+                    "LOAN_DUE",
+                    loan.id,
+                    CRITICAL,
+                    f"{this_month.isoformat()}:overdue",
+                    "/expenses",
+                    loan_id=loan.id,
+                    name=loan.name,
+                    amount=loan.installment_amount,
+                    due_date=this_month.isoformat(),
+                    days_left=(this_month - today).days,
+                )
+            )
+            continue
+        if not loan.has_installments_left:
             continue
         due = next_payment_date(today, loan.payment_day)
         days = (due - today).days
@@ -121,6 +143,35 @@ def rule_loan_due(
                 amount=loan.installment_amount,
                 due_date=due.isoformat(),
                 days_left=days,
+            )
+        )
+    return out
+
+
+def rule_budget_runs_out(forecast_rows: Iterable[dict], already_alerted: Iterable[str] = ()) -> list[dict]:
+    """BUDGET_RUNS_OUT: przy obecnym tempie wydatków budżet kategorii skończy się przed końcem miesiąca.
+
+    forecast_rows: kategorie z prognozy (`app/forecast.py`).
+    already_alerted: kategorie, które mają już alert CATEGORY_USAGE (od 80% budżetu); nie ostrzegamy o nich drugi raz.
+    Ten alert jest więc wczesnym ostrzeżeniem: wydatki są jeszcze poniżej 80%, ale tempo jest za wysokie.
+    """
+    skip = set(already_alerted)
+    out = []
+    for row in forecast_rows:
+        if row.get("status") != "WARN" or not row.get("runs_out_on") or row["category"] in skip:
+            continue
+        out.append(
+            alert(
+                "BUDGET_RUNS_OUT",
+                row["category"],
+                WARNING,
+                row["runs_out_on"],
+                "/budget",
+                category=row["category"],
+                runs_out_on=row["runs_out_on"],
+                budget=row["budget"],
+                projected_total=row["projected_total"],
+                daily_limit=row["daily_limit"],
             )
         )
     return out
