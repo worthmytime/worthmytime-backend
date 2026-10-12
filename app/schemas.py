@@ -188,6 +188,9 @@ class WishIn(BaseModel):
 
 class DecisionIn(BaseModel):
     decision: Literal["BOUGHT", "DROPPED"]
+    # zakup dopisuje wydatek do rejestru (domyślnie tak); kategoria wpisu, gdy pozycja jej nie ma albo ma być inna
+    add_expense: bool = True
+    category: Category | None = None
 
 
 class GoalIn(BaseModel):
@@ -201,6 +204,8 @@ class GoalIn(BaseModel):
 
 class DepositIn(BaseModel):
     amount: MoneyIn = Field(description="dodatnia wpłata albo ujemna wypłata")
+    # wpłata dopisuje wydatek do rejestru w kategorii celu albo w Przyszłości (domyślnie tak); wypłata nigdy
+    add_expense: bool = True
 
     @model_validator(mode="after")
     def _nonzero(self):
