@@ -491,9 +491,14 @@ OPERATIONS: list[dict] = [
         "liczony jest z dzisiejszego dochodu, podziału i rat.",
         extra={409: "Brak dochodu lub stawki w profilu"}),
     _op("GET", "/export", "export_data", "Raporty", "Eksport danych użytkownika (JSON albo CSV)", (200, "Plik do pobrania", None),
-        query=[_q("format", "Format pliku (domyślnie json)", {"enum": ["json", "csv"]})],
+        query=[
+            _q("format", "Format pliku (domyślnie json)", {"enum": ["json", "csv"]}),
+            _q("from", "Początek zakresu, YYYY-MM-DD (domyślnie bez ograniczenia)", {"type": "string", "format": "date"}),
+            _q("to", "Koniec zakresu włącznie, YYYY-MM-DD (domyślnie bez ograniczenia)", {"type": "string", "format": "date"}),
+        ],
         description="Wydatki, cele, lista życzeń i zapisane obliczenia. CSV to jedna tabela z typem wiersza w kolumnie `type` "
-        "(UTF-8 z BOM); JSON zawiera pełne dane. Odpowiedź ma nagłówek `Content-Disposition: attachment`."),
+        "(UTF-8 z BOM); JSON zawiera pełne dane. Odpowiedź ma nagłówek `Content-Disposition: attachment`. "
+        "Zakres `from`/`to` dotyczy daty wydatku, a dla celów, życzeń i obliczeń daty utworzenia."),
 ]
 
 _JSON = "application/json"
