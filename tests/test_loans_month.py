@@ -34,3 +34,59 @@ def test_last_installment_counts_for_the_whole_month_it_was_due(client, monkeypa
     _today(monkeypatch, date(2026, 11, 2))
     body = client.get(URL, headers=auth)[1].json
     assert body["monthly_loans"] == 800 and body["available"]["NEEDS"] == 2700
+
+
+def _loan(**over):
+    return {"name": "Kredyt auto", "installment_amount": 800, "installments_left": 24, "payment_day": 12, **over}
+
+
+def test_saving_budget_keeps_loan_ids_and_paid_installments_stay_linked(client):
+    auth = _register(client, "loanm2@b.pl")
+    client.put("/api/v1/profile", json=PROFILE, headers=auth)
+    saved = client.put(URL, json={"percentages": PERCENTAGES, "loans": [_loan()]}, headers=auth)[1].json["loans"]
+    loan_id = saved[0]["id"]
+    paid = client.post(f"/api/v1/budget/loans/{loan_id}/pay", json={}, headers=auth)[1]
+    assert paid.status == 201 and paid.json["source_id"] == loan_id
+
+    # ponowny zapis z tym samym id zmienia kredyt w miejscu
+    body = {"percentages": PERCENTAGES, "loans": [_loan(id=loan_id, name="Kredyt na auto", installment_amount=850)]}
+    (after,) = client.put(URL, json=body, headers=auth)[1].json["loans"]
+    assert (after["id"], after["name"], after["installment_amount"]) == (loan_id, "Kredyt na auto", 850)
+    # rata z tego miesiąca jest nadal rozpoznawana jako opłacona
+    assert client.post(f"/api/v1/budget/loans/{loan_id}/pay", json={}, headers=auth)[1].status == 409
+
+
+def test_budget_saved_without_loans_field_leaves_loans_untouched(client):
+    auth = _register(client, "loanm3@b.pl")
+    client.put("/api/v1/profile", json=PROFILE, headers=auth)
+    (loan,) = client.put(URL, json={"percentages": PERCENTAGES, "loans": [_loan()]}, headers=auth)[1].json["loans"]
+
+    # zapis samych procentów (strona Budżet): kredyty i ich identyfikatory zostają
+    res = client.put(URL, json={"percentages": {"NEEDS": 60, "FUTURE": 20, "GOALS": 10, "FUN": 10}}, headers=auth)[1]
+    assert res.status == 200 and res.json["percentages"]["NEEDS"] == 60
+    assert [x["id"] for x in res.json["loans"]] == [loan["id"]] and res.json["monthly_loans"] == 800
+
+    # pusta lista nadal usuwa wszystkie kredyty
+    res = client.put(URL, json={"percentages": PERCENTAGES, "loans": []}, headers=auth)[1]
+    assert res.json["loans"] == [] and res.json["monthly_loans"] == 0
+
+
+def test_loans_are_added_updated_and_removed_by_id(client):
+    auth = _register(client, "loanm4@b.pl")
+    client.put("/api/v1/profile", json=PROFILE, headers=auth)
+    first, second = client.put(
+        URL, json={"percentages": PERCENTAGES, "loans": [_loan(name="A"), _loan(name="B")]}, headers=auth
+    )[1].json["loans"]
+
+    # B zostaje (z id), A znika, C jest nowy; nieznany id oznacza po prostu nowy kredyt
+    body = {"percentages": PERCENTAGES, "loans": [_loan(id=second["id"], name="B"), _loan(id="nie-ma", name="C")]}
+    loans = client.put(URL, json=body, headers=auth)[1].json["loans"]
+    assert [x["name"] for x in loans] == ["B", "C"]
+    assert loans[0]["id"] == second["id"] and loans[1]["id"] not in (first["id"], second["id"], "nie-ma")
+
+    # cudzy identyfikator nie daje dostępu do cudzego kredytu
+    other = _register(client, "loanm5@b.pl")
+    client.put("/api/v1/profile", json=PROFILE, headers=other)
+    body = {"percentages": PERCENTAGES, "loans": [_loan(id=second["id"], name="X")]}
+    assert client.put(URL, json=body, headers=other)[1].json["loans"][0]["id"] != second["id"]
+    assert [x["name"] for x in client.get(URL, headers=auth)[1].json["loans"]] == ["B", "C"]

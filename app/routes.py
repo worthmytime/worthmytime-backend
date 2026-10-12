@@ -272,6 +272,33 @@ async def get_budget(request: Request):
     return ok(await budget_view(request, user, row, loans, _user_income(user), _user_rate(user)))
 
 
+async def _replace_loans(db, user: User, existing: list[BudgetLoan], incoming: list) -> list[BudgetLoan]:
+    """Lista kredytów po zapisie: kredyt z `id` jest aktualizowany w miejscu, bez `id` dodawany, a pominięty usuwany.
+
+    Identyfikator musi przetrwać zapis, bo wpisy opłaconych rat w rejestrze wskazują kredyt właśnie przez niego.
+    """
+    by_id = {loan.id: loan for loan in existing}
+    result: list[BudgetLoan] = []
+    for i, data in enumerate(incoming):
+        loan = by_id.pop(data.id, None) if data.id else None  # nieznany albo powtórzony id oznacza nowy kredyt
+        if loan is None:
+            loan = BudgetLoan(user_id=user.id)
+            db.add(loan)
+        loan.position = i
+        loan.name = data.name
+        loan.installment_amount = data.installment_amount
+        # migawka liczby rat na dziś (przy podanej dacie końca liczy się ona dynamicznie)
+        loan.installments_left = data.installments_left or remaining_installments(
+            today(), None, data.end_date, data.payment_day
+        )
+        loan.start_date, loan.end_date = data.start_date, data.end_date
+        loan.payment_day, loan.loan_amount = data.payment_day, data.loan_amount
+        result.append(loan)
+    for removed in by_id.values():
+        await db.delete(removed)
+    return result
+
+
 @bp.put("/budget")
 @login_required
 async def put_budget(request: Request):
@@ -285,27 +312,10 @@ async def put_budget(request: Request):
         setattr(row, f"pct_{cat.value.lower()}", data.percentages[cat])
     if data.rollover is not None:  # brak pola zostawia dotychczasowe ustawienie
         apply_rollover(row, data.rollover)
-    # lista kredytów jest zastępowana w całości (jak w formularzu: zapis całego planu)
     db = request.ctx.db
-    for old in await load_loans(request, user):
-        await db.delete(old)
-    loans = [
-        BudgetLoan(
-            user_id=user.id,
-            position=i,
-            name=loan.name,
-            installment_amount=loan.installment_amount,
-            # migawka liczby rat na dziś (przy podanej dacie końca liczy się ona dynamicznie)
-            installments_left=loan.installments_left
-            or remaining_installments(today(), None, loan.end_date, loan.payment_day),
-            start_date=loan.start_date,
-            end_date=loan.end_date,
-            payment_day=loan.payment_day,
-            loan_amount=loan.loan_amount,
-        )
-        for i, loan in enumerate(data.loans)
-    ]
-    db.add_all(loans)
+    loans = await load_loans(request, user)
+    if data.loans is not None:  # brak pola zostawia kredyty bez zmian (zapis samych procentów)
+        loans = await _replace_loans(db, user, loans, data.loans)
     await db.commit()
     # wydane w kategoriach liczy rejestr wydatków, nie ten formularz
     return ok(await budget_view(request, user, row, loans, _user_income(user), _user_rate(user)))

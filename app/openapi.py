@@ -470,7 +470,8 @@ OPERATIONS: list[dict] = [
     _op("GET", "/budget", "get_budget", "Profil i budżet", "Plan budżetu z wykorzystaniem kategorii i kredytami",
         (200, "Budżet", "Budget")),
     _op("PUT", "/budget", "put_budget", "Profil i budżet", "Zapis planu budżetu i kredytów", (200, "Budżet", "Budget"),
-        body=s.BudgetIn, description="Procenty kategorii muszą sumować się do 100. Zapis tworzy raty od nowa (nowe identyfikatory). "
+        body=s.BudgetIn, description="Procenty kategorii muszą sumować się do 100. Kredyt przesłany z `id` jest aktualizowany w miejscu i zachowuje "
+        "identyfikator, bez `id` jest dodawany, a pominięty na liście usuwany; brak pola `loans` zostawia kredyty bez zmian. "
         "`rollover` włącza przenoszenie niewykorzystanych środków kategorii na kolejny miesiąc; pominięte pole zostawia ustawienie bez zmian."),
     _op("GET", "/budget/forecast", "budget_forecast", "Profil i budżet", "Dzienny limit i prognoza końca miesiąca",
         (200, "Prognoza kategorii", "Forecast"), extra={409: "Brak dochodu lub stawki w profilu"}),
