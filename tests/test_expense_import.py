@@ -4,6 +4,10 @@ from tests.test_api import PROFILE, _register, client  # noqa: F401
 URL = "/api/v1/expenses/import"
 
 
+def _counts(res):
+    return res.json["created"], res.json["skipped"]
+
+
 def _item(key="2026-10-06|-5.50|P425125001349343126458731", **over):
     return {"category": "FUN", "amount": 5.5, "note": "ZABKA", "spent_on": "2026-10-06", "key": key, **over}
 
@@ -13,7 +17,7 @@ def test_import_creates_entries_with_import_source(client):
     client.put("/api/v1/profile", json=PROFILE, headers=auth)
     items = [_item(), _item(key="2026-10-06|-24.68|P425125001349343125114308", amount=24.68, note="ZABKA")]
     _, res = client.post(URL, json={"items": items}, headers=auth)
-    assert res.status == 201 and res.json == {"created": 2, "skipped": 0}
+    assert res.status == 201 and _counts(res) == (2, 0)
 
     _, listed = client.get("/api/v1/expenses?month=2026-10", headers=auth)
     assert {e["source_type"] for e in listed.json["items"]} == {"IMPORT"}
@@ -24,9 +28,9 @@ def test_import_is_idempotent_and_skips_duplicates_within_request(client):
     auth = _register(client, "imp2@b.pl")
     items = [_item(), _item(), _item(key="2026-10-07|-25.00|BLIK00000095117031783", amount=25, note="PLAYER.PL")]
     _, first = client.post(URL, json={"items": items}, headers=auth)
-    assert first.json == {"created": 2, "skipped": 1}  # powtórzony klucz w jednym żądaniu
+    assert _counts(first) == (2, 1)  # powtórzony klucz w jednym żądaniu
     _, again = client.post(URL, json={"items": items}, headers=auth)
-    assert again.status == 200 and again.json == {"created": 0, "skipped": 3}  # ponowny import tego samego wyciągu
+    assert again.status == 200 and _counts(again) == (0, 3)  # ponowny import tego samego wyciągu
     _, listed = client.get("/api/v1/expenses?month=2026-10", headers=auth)
     assert len(listed.json["items"]) == 2
 

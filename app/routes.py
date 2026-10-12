@@ -5,7 +5,7 @@ from sanic.response import empty, html
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from . import calc
+from . import calc, life
 from .budget import analyze
 from .config import settings
 from .errors import ApiError
@@ -34,7 +34,16 @@ from .money import rnd
 from .openapi import SWAGGER_UI_HTML, build_spec
 from .pagination import encode_cursor, escape_like, parse_list_params
 from .planning import remaining_installments
-from .schemas import CATEGORIES, BudgetIn, CalculateIn, CalculationIn, CompareIn, Credentials, ProfileIn
+from .schemas import (
+    CATEGORIES,
+    BudgetIn,
+    CalculateIn,
+    CalculationIn,
+    CompareIn,
+    Credentials,
+    LifeContextIn,
+    ProfileIn,
+)
 from .security import create_token, decode_token, hash_password, verify_password
 from .session import clear_session_cookies, set_session_cookies
 
@@ -163,6 +172,32 @@ async def put_profile(request: Request):
     user.rate_mode = data.rate_mode
     await request.ctx.db.commit()
     return ok(user_profile(user))
+
+
+def _life_context(user: User) -> dict:
+    """Odpowiedzi z wywiadu (wszystkie pola, brakujące jako null) i zdania, które z nich dostaje Jev."""
+    answers = LifeContextIn.model_validate(user.life_context or {}).model_dump()
+    return {"context": answers, "summary": life.summary(answers), "filled": user.life_context is not None}
+
+
+@bp.get("/profile/context")
+@login_required
+async def get_life_context(request: Request):
+    return ok(_life_context(request.ctx.user))
+
+
+@bp.put("/profile/context")
+@login_required
+async def put_life_context(request: Request):
+    """Zapis wywiadu o sytuacji życiowej; pusty wywiad (same null) usuwa zapisane odpowiedzi."""
+    data = parse(LifeContextIn, request)
+    user = request.ctx.user
+    answers = data.model_dump(exclude_none=True)
+    if not answers.get("custom"):
+        answers.pop("custom", None)  # pusta lista własnych kategorii to brak odpowiedzi
+    user.life_context = answers or None
+    await request.ctx.db.commit()
+    return ok(_life_context(user))
 
 
 # ---------- obliczenia bezstanowe (bez logowania) ----------

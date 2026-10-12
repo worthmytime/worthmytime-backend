@@ -208,6 +208,14 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
     "ColumnMapping": _obj(
         {"mapping": _obj({f: {"type": ["integer", "null"]} for f in ("date", "amount", "description", "currency")})}, ["mapping"]
     ),
+    "LifeContext": _obj(
+        {
+            "context": {"type": "object", "description": "odpowiedzi z wywiadu; brak odpowiedzi to null"},
+            "summary": {"type": "array", "items": _str, "description": "zdania, które z odpowiedzi dostaje Jev"},
+            "filled": {"type": "boolean"},
+        },
+        ["context", "summary"],
+    ),
     "Forecast": _obj(
         {
             "currency": _str,
@@ -247,7 +255,24 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
     "ExpenseList": _list_of(
         "Expense", month={"type": "string"}, totals=_obj({}), total=_num, loan_payments={"type": "number"}
     ),
-    "ImportResult": _obj({"created": {"type": "integer"}, "skipped": {"type": "integer"}}, ["created", "skipped"]),
+    "ImportResult": _obj(
+        {"created": {"type": "integer"}, "skipped": {"type": "integer"}, "batch_id": {"type": "string", "description": "identyfikator importu w historii"}},
+        ["created", "skipped"],
+    ),
+    "ImportBatch": _obj(
+        {
+            "id": _str,
+            "file_name": {"type": ["string", "null"], "description": "nazwa pliku z rozszerzeniem"},
+            "imported_at": {"type": "string", "format": "date-time"},
+            "created": {"type": "integer"},
+            "skipped": {"type": "integer"},
+            "total": _num,
+            "remaining": {"type": "integer", "description": "wpisy z tego importu, które są jeszcze w rejestrze"},
+            "undone_at": {"type": ["string", "null"], "format": "date-time"},
+        },
+        ["id", "imported_at", "created", "skipped"],
+    ),
+    "ImportBatchList": _list_of("ImportBatch"),
     "ExpenseSummary": _obj({"months": {"type": "array", "items": _obj({"month": _str, "totals": _obj({}), "total": _num})}}),
     "RecurringExpense": _obj(
         {
@@ -435,6 +460,13 @@ OPERATIONS: list[dict] = [
     _op("GET", "/profile", "get_profile", "Profil i budżet", "Profil finansowy", (200, "Profil", "Profile")),
     _op("PUT", "/profile", "put_profile", "Profil i budżet", "Zapis profilu (dochód lub stawka, dojazd, koszty pracy)",
         (200, "Profil", "Profile"), body=s.ProfileIn),
+    _op("GET", "/profile/context", "get_life_context", "Profil i budżet", "Wywiad o sytuacji życiowej",
+        (200, "Odpowiedzi i ich opis dla Jev", "LifeContext")),
+    _op("PUT", "/profile/context", "put_life_context", "Profil i budżet", "Zapis wywiadu o sytuacji życiowej",
+        (200, "Odpowiedzi i ich opis dla Jev", "LifeContext"), body=s.LifeContextIn,
+        description="Mieszkanie, transport, praca, sprzęt, oszczędności, zwierzęta, zdrowie i rozwój oraz własne kategorie użytkownika "
+        "(`custom`: nazwa i opis, do 10); każde pole jest opcjonalne. Odpowiedzi trafiają do Jev "
+        "jako kontekst przy propozycji kategorii (`POST /ai/categorize`) dla zalogowanego użytkownika."),
     _op("GET", "/budget", "get_budget", "Profil i budżet", "Plan budżetu z wykorzystaniem kategorii i kredytami",
         (200, "Budżet", "Budget")),
     _op("PUT", "/budget", "put_budget", "Profil i budżet", "Zapis planu budżetu i kredytów", (200, "Budżet", "Budget"),
@@ -448,7 +480,9 @@ OPERATIONS: list[dict] = [
         extra={409: "Rata za ten miesiąc jest już opłacona"}),
     _op("GET", "/alerts", "list_alerts", "Profil i budżet", "Centrum alertów", (200, "Aktywne alerty", "AlertList")),
     _op("POST", "/alerts/{key}/dismiss", "dismiss_alert", "Profil i budżet", "Ukryj alert do zmiany jego stanu",
-        (200, "Ukryto", None), description="`key` ma postać `KOD:przedmiot`, np. `CATEGORY_USAGE:FUN` (może być zakodowany procentowo)."),
+        (200, "Ukryto", None), description="`key` ma postać `KOD:przedmiot`, np. `CATEGORY_USAGE:FUN` (może być zakodowany procentowo). "
+        "Kody: `CATEGORY_USAGE`, `BUDGET_DEFICIT`, `BUDGET_RUNS_OUT` (budżet kategorii skończy się przed końcem miesiąca), "
+        "`LOAN_DUE` (także rata po terminie: ujemne `days_left`), alerty celów i listy życzeń."),
     # Wydatki
     _op("GET", "/expenses", "list_expenses", "Wydatki", "Rejestr wydatków z miesiąca", (200, "Wpisy i sumy", "ExpenseList"),
         query=[_q("month", "Miesiąc `YYYY-MM` (domyślnie bieżący)")],
@@ -462,7 +496,14 @@ OPERATIONS: list[dict] = [
     _op("POST", "/expenses/import", "import_expenses", "Wydatki", "Import wielu wydatków naraz (np. z wyciągu bankowego)",
         (201, "Wpisy dopisane (200, gdy wszystkie już istniały)", "ImportResult"), body=s.ExpenseImportIn,
         description="Idempotentne: pozycja z tym samym `key` nie tworzy drugiego wpisu (`skipped`). Do 500 pozycji na żądanie, "
-        "wpisy mają `source_type=IMPORT`."),
+        "wpisy mają `source_type=IMPORT`. Każdy import trafia do historii (`GET /imports`) z nazwą pliku `file_name`; "
+        "kolejne porcje dużego pliku podają `batch_id` z pierwszej odpowiedzi.",
+        extra={409: "Import wskazany w `batch_id` został cofnięty albo ten sam plik jest właśnie importowany"}),
+    _op("GET", "/imports", "list_imports", "Wydatki", "Historia importów", (200, "Importy od najnowszych", "ImportBatchList")),
+    _op("DELETE", "/imports/{batch_id}", "undo_import", "Wydatki", "Cofnięcie importu", (200, "Import po cofnięciu", "ImportBatch"),
+        description="Usuwa z rejestru wszystkie wpisy dopisane przez ten import (także później edytowane). "
+        "Po cofnięciu ten sam plik można zaimportować ponownie.",
+        extra={409: "Import został już cofnięty"}),
     _op("GET", "/expenses/summary", "expenses_summary", "Wydatki", "Trend wydatków w ostatnich miesiącach",
         (200, "Podsumowanie miesięcy", "ExpenseSummary"),
         query=[_q("months", "Liczba miesięcy (1-24, domyślnie 6)", {"type": "integer", "minimum": 1, "maximum": 24})]),
@@ -524,7 +565,8 @@ OPERATIONS: list[dict] = [
     _op("POST", "/ai/categorize", "ai_categorize", "Podpowiedzi Jev", "Propozycja kategorii budżetu dla wydatków",
         (200, "Kategoria dla każdego klucza (pozycje bez pewnej odpowiedzi są pomijane)", "CategorySuggestions"),
         auth=False, body=s.CategorizeIn,
-        description="Do 60 pozycji na żądanie. Osobny limit żądań na adres IP (`RATE_LIMIT_AI_PER_MINUTE`).",
+        description="Do 60 pozycji na żądanie. Osobny limit żądań na adres IP (`RATE_LIMIT_AI_PER_MINUTE`). "
+        "Dla zalogowanego użytkownika z wypełnionym wywiadem (`/profile/context`) Jev dostaje też opis jego sytuacji życiowej.",
         extra={502: "Jev nie odpowiedział", 503: "Brak klucza Jev na serwerze (`TYPESAFE_API_KEY`)"}),
     _op("POST", "/ai/map-columns", "ai_map_columns", "Podpowiedzi Jev", "Rozpoznanie kolumn pliku z historią transakcji",
         (200, "Numer kolumny dla daty, kwoty, opisu i waluty albo null", "ColumnMapping"), auth=False, body=s.MapColumnsIn,

@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -36,6 +36,8 @@ class User(Base):
     commute_minutes_per_day: Mapped[float] = mapped_column(Float, default=0.0)
     work_costs_monthly: Mapped[float] = mapped_column(Money, default=0.0)
     rate_mode: Mapped[str] = mapped_column(String(7), default="NOMINAL")
+    # wywiad o sytuacji życiowej (mieszkanie, transport, praca, sprzęt): kontekst dla Jev; brak = niewypełniony
+    life_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     calculations: Mapped[list["Calculation"]] = relationship(
@@ -147,6 +149,8 @@ class Expense(Base):
     # WISH (zakup z listy życzeń), GOAL (wpłata na cel); brak = wpis ręczny
     source_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # import, który dopisał ten wpis (historia importów pozwala cofnąć go w całości); brak = wpis spoza importu
+    import_batch_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     # to samo źródło nie może dopisać dwóch wpisów z tym samym terminem (idempotentne generowanie)
@@ -242,3 +246,18 @@ class GoalDeposit(Base):
     amount: Mapped[float] = mapped_column(Money)
     deposited_on: Mapped[date] = mapped_column(Date, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ImportBatch(Base):
+    """Jeden import wyciągu: zdarzenie w historii, które można cofnąć (usuwa wpisy dopisane przez ten import)."""
+
+    __tablename__ = "import_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)  # nazwa pliku z rozszerzeniem
+    created: Mapped[int] = mapped_column(Integer, default=0)  # wpisy dopisane do rejestru
+    skipped: Mapped[int] = mapped_column(Integer, default=0)  # pozycje pominięte, bo już były w rejestrze
+    total: Mapped[float] = mapped_column(Money, default=0.0)  # suma dopisanych wpisów
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

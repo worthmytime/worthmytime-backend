@@ -43,11 +43,18 @@ def choice(instructions: str, criteria: dict[str, str]) -> dict:
     return {"type": "choice", "instructions": instructions, "criteria": criteria}
 
 
-def categorize_request(descriptions: list[str]) -> tuple[dict, dict]:
-    """Stan i pytania: jedno pytanie na wydatek (q0, q1, ...), każde wprost wskazuje, którego wydatku dotyczy."""
-    state = {"wydatki": [{"nr": i + 1, "opis": d} for i, d in enumerate(descriptions)]}
+def categorize_request(descriptions: list[str], user_context: list[str] | None = None) -> tuple[dict, dict]:
+    """Stan i pytania: jedno pytanie na wydatek (q0, q1, ...), każde wprost wskazuje, którego wydatku dotyczy.
+
+    `user_context` to zdania z wywiadu o sytuacji życiowej (`app/life.py`); Jev ma je uwzględnić przy wyborze.
+    """
+    state: dict = {"wydatki": [{"nr": i + 1, "opis": d} for i, d in enumerate(descriptions)]}
+    hint = ""
+    if user_context:
+        state["uzytkownik"] = user_context
+        hint = " Weź pod uwagę sytuację użytkownika opisaną w polu uzytkownik."
     questions = {
-        f"q{i}": choice(f'Do której kategorii budżetu należy wydatek nr {i + 1}: "{d}"?', CATEGORY_CRITERIA)
+        f"q{i}": choice(f'Do której kategorii budżetu należy wydatek nr {i + 1}: "{d}"?{hint}', CATEGORY_CRITERIA)
         for i, d in enumerate(descriptions)
     }
     return state, questions

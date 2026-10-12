@@ -86,7 +86,8 @@ Podpowiedzi kategorii wydatków i rozpoznawanie kolumn pliku importu robi Jev. *
 - Ustaw `TYPESAFE_API_KEY` w `.env` backendu (docker-compose podaje go kontenerowi jako zmienną środowiskową; klucz nie jest wbudowywany w obraz). Bez klucza endpointy zwracają 503, a frontend przechodzi na dopasowanie bez Jev.
 - `TYPESAFE_BASE_URL` może wskazywać proxy LiteLLM z repozytorium `worthmytime-infrastructure` (`http://litellm:4000/typesafe`); wtedy `TYPESAFE_API_KEY` to wirtualny klucz LiteLLM, a prawdziwy klucz Jev zna tylko proxy.
 - Endpointy działają też bez konta (import wyciągu nie wymaga logowania), dlatego mają własny limit `RATE_LIMIT_AI_PER_MINUTE` i ograniczenia rozmiaru wejścia: do 60 opisów albo 30 kolumn z kilkoma przykładami na żądanie.
-- Do Jev trafiają tylko opisy wydatków oraz nagłówki i przykładowe wartości kolumn. W logach zapisujemy sam rodzaj błędu, bez treści zapytania.
+- **Wywiad o sytuacji życiowej** (`GET/PUT /profile/context`: mieszkanie, transport, praca, sprzęt, oszczędności, zwierzęta, zdrowie i rozwój oraz własne kategorie użytkownika) zamieniany jest na zdania (`app/life.py`) i dołączany do pytania o kategorię dla zalogowanego użytkownika, np. „Mieszka z rodzicami: nie płaci czynszu najmu ani raty za mieszkanie.”. Wszystkie pola są opcjonalne.
+- Do Jev trafiają tylko opisy wydatków, zdania z wywiadu (odpowiedzi z list i własny dopisek użytkownika) oraz nagłówki i przykładowe wartości kolumn. W logach zapisujemy sam rodzaj błędu, bez treści zapytania.
 
 ## Przełączniki funkcji (feature flags)
 
