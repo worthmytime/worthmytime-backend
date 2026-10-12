@@ -222,7 +222,7 @@ def plan_from_input(budget: BudgetIn | None, monthly_income: float) -> BudgetPla
         percentages=dict(budget.percentages),
         spent=dict(budget.spent),
         is_custom=True,
-        **_loan_totals(budget.loans),
+        **_loan_totals(budget.loans or []),
     )
 
 

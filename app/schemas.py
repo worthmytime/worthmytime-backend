@@ -40,6 +40,8 @@ DEFAULT_PERCENTAGES = {Category.NEEDS: 50.0, Category.FUTURE: 25.0, Category.GOA
 class LoanIn(BaseModel):
     """Kredyt lub pożyczka w trakcie spłaty (rata to wymagalne zobowiązanie, P0)."""
 
+    # identyfikator istniejącego kredytu: zapis aktualizuje go w miejscu (wpisy opłaconych rat zostają z nim powiązane)
+    id: str | None = Field(default=None, max_length=36)
     name: str = Field(min_length=1, max_length=100)
     installment_amount: MoneyIn = Field(gt=0, description="wysokość miesięcznej raty")
     # liczba rat do spłacenia: podaj ją albo datę końca spłaty (wtedy liczba rat maleje sama z czasem)
@@ -63,8 +65,9 @@ class BudgetIn(BaseModel):
 
     percentages: dict[Category, float] = Field(default_factory=lambda: dict(DEFAULT_PERCENTAGES))
     spent: dict[Category, float] = Field(default_factory=dict)
-    # kredyty i pożyczki: raty wchodzą automatycznie do kategorii NEEDS, więc nie wpisuje się ich w `spent`
-    loans: list[LoanIn] = Field(default_factory=list, max_length=30)
+    # kredyty i pożyczki: raty wchodzą automatycznie do kategorii NEEDS, więc nie wpisuje się ich w `spent`;
+    # brak pola = bez zmian (zapis samych procentów), pusta lista = usunięcie wszystkich
+    loans: list[LoanIn] | None = Field(default=None, max_length=30)
     # przenoszenie niewykorzystanych środków na kolejny miesiąc, per kategoria; brak pola = bez zmian
     rollover: dict[Category, bool] | None = None
 
