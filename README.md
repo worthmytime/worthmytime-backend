@@ -95,10 +95,10 @@ Czat, który zna bieżący miesiąc użytkownika i podpowiada, jak pokierować w
 
 | Zmienna | Opis |
 |---|---|
-| `ASSISTANT_API_KEY` | klucz do API modelu; pusty = asystent wyłączony (endpoint zwraca 503) |
-| `ASSISTANT_MODEL` | nazwa modelu, np. `gpt-4o-mini`; wymagana |
-| `ASSISTANT_BASE_URL` | adres API zgodnego z OpenAI Chat Completions, domyślnie `https://api.openai.com/v1`; może wskazywać proxy LiteLLM (`http://litellm:4000/v1`) albo innego dostawcę |
+| `ASSISTANT_API_KEY` | klucz OpenAI; działa też standardowa nazwa `OPENAI_API_KEY`. Pusty = asystent wyłączony (endpoint zwraca 503) |
+| `ASSISTANT_MODEL` | nazwa modelu OpenAI, np. `gpt-5.5`; wymagana |
 
+- Model wołamy oficjalną biblioteką [`openai`](https://developers.openai.com/api/reference/python) (klient asynchroniczny, Responses API, `store=false`). Limit czasu to 60 s, a nieudane wywołanie jest ponawiane raz.
 - Przy każdym pytaniu serwer składa aktualne podsumowanie miesiąca (`app/assistant.py`): dochód, budżet i wydatki kategorii, raty, prognoza, dziesięć największych wydatków, stałe wydatki, cele i wywiad o sytuacji życiowej. `GET /api/v1/assistant/context` zwraca te same zdania, żeby użytkownik widział, co wysyłamy.
 - **Te dane i treść rozmowy trafiają do zewnętrznego dostawcy modelu.** Nie wysyłamy e-maila ani identyfikatorów konta.
 - Rozmowa nie jest zapisywana na serwerze; historię trzyma przeglądarka i odsyła ją przy każdym pytaniu (do 30 wiadomości).

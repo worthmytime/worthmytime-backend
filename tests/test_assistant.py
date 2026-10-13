@@ -1,10 +1,11 @@
 # ruff: noqa: F811
-import urllib.error
 from datetime import date
+
+import openai
 
 from app import assistant
 from app.budget import BudgetPlan
-from app.config import settings
+from app.config import Settings, settings
 from app.forecast import forecast
 from app.helpers import today
 from app.schemas import Category
@@ -55,16 +56,10 @@ def test_context_says_when_there_is_nothing():
     assert "Stałe wydatki" not in text and "Cele oszczędnościowe" not in text and "Sytuacja życiowa" not in text
 
 
-def test_chat_messages_put_user_data_into_system_prompt():
-    history = [
-        {"role": "user", "content": "Cześć"},
-        {"role": "assistant", "content": "Hej"},
-        {"role": "user", "content": "?"},
-    ]
-    messages = assistant.chat_messages(["Dochód: 7000.00 PLN."], history)
-    assert messages[0]["role"] == "system" and "Dane użytkownika:\n- Dochód: 7000.00 PLN." in messages[0]["content"]
-    assert "nie porada finansowa" in messages[0]["content"]
-    assert messages[1:] == history
+def test_instructions_carry_user_data_and_rules():
+    text = assistant.instructions(["Dochód: 7000.00 PLN."])
+    assert "Dane użytkownika:\n- Dochód: 7000.00 PLN." in text
+    assert "nie porada finansowa" in text and "wyłącznie na danych" in text
 
 
 def _configure(monkeypatch, reply="Wydawaj najwyżej 4 zł dziennie na przyjemności."):
@@ -73,11 +68,11 @@ def _configure(monkeypatch, reply="Wydawaj najwyżej 4 zł dziennie na przyjemno
     monkeypatch.setattr(settings, "assistant_api_key", "sekret")
     monkeypatch.setattr(settings, "assistant_model", "gpt-test")
 
-    def post(payload):
-        sent.append(payload)
-        return {"choices": [{"message": {"role": "assistant", "content": f"  {reply}  "}}]}
+    async def ask(system, history):
+        sent.append({"instructions": system, "input": history})
+        return f"  {reply}  "
 
-    monkeypatch.setattr(assistant, "_post", post)
+    monkeypatch.setattr(assistant, "_ask", ask)
     return sent
 
 
@@ -93,14 +88,13 @@ def test_chat_sends_month_data_and_conversation_to_the_model(client, monkeypatch
     _, res = client.post(CHAT, json=QUESTION, headers=auth)
     assert res.status == 200 and res.json == {"reply": "Wydawaj najwyżej 4 zł dziennie na przyjemności."}
 
-    (payload,) = sent
-    assert payload["model"] == "gpt-test" and set(payload) == {"model", "messages"}
-    system, question = payload["messages"]
-    assert system["role"] == "system" and question == QUESTION["messages"][0]
-    assert "Przyjemności: budżet 700.00 PLN, wydane 650.00 PLN, zostało 50.00 PLN" in system["content"]
-    assert "koncert 650.00 PLN (Przyjemności)" in system["content"]
-    assert "Mieszka z rodzicami" in system["content"]
-    assert "asst1@b.pl" not in system["content"]  # adres e-mail nie trafia do modelu
+    (call,) = sent
+    assert call["input"] == QUESTION["messages"]  # rozmowa idzie bez zmian, dane miesiąca są w instrukcji
+    system = call["instructions"]
+    assert "Przyjemności: budżet 700.00 PLN, wydane 650.00 PLN, zostało 50.00 PLN" in system
+    assert "koncert 650.00 PLN (Przyjemności)" in system
+    assert "Mieszka z rodzicami" in system
+    assert "asst1@b.pl" not in system  # adres e-mail nie trafia do modelu
 
 
 def test_context_endpoint_shows_what_the_model_gets(client, monkeypatch):
@@ -140,14 +134,23 @@ def test_model_failures_become_502_without_leaking_the_key(client, monkeypatch):
     auth = _register(client, "asst4@b.pl")
     client.put("/api/v1/profile", json=PROFILE, headers=auth)
 
-    def broken(payload):
-        raise urllib.error.URLError("brak sieci")
+    async def broken(system, history):
+        raise openai.OpenAIError("brak sieci, klucz sekret")
 
-    monkeypatch.setattr(assistant, "_post", broken)
+    monkeypatch.setattr(assistant, "_ask", broken)
     _, res = client.post(CHAT, json=QUESTION, headers=auth)
-    assert res.status == 502 and "sekret" not in res.text
+    assert res.status == 502 and "sekret" not in res.text  # komunikat biblioteki nie trafia do odpowiedzi
 
-    monkeypatch.setattr(assistant, "_post", lambda payload: {"choices": []})  # odpowiedź w nieznanym kształcie
+    async def empty(system, history):
+        return "   "
+
+    monkeypatch.setattr(assistant, "_ask", empty)
     assert client.post(CHAT, json=QUESTION, headers=auth)[1].status == 502
-    monkeypatch.setattr(assistant, "_post", lambda payload: {"choices": [{"message": {"content": "  "}}]})
-    assert client.post(CHAT, json=QUESTION, headers=auth)[1].status == 502
+
+
+def test_api_key_can_use_the_standard_openai_name(monkeypatch):
+    monkeypatch.delenv("ASSISTANT_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-standard")
+    assert Settings(_env_file=None).assistant_api_key == "sk-standard"
+    monkeypatch.setenv("ASSISTANT_API_KEY", "sk-wlasny")
+    assert Settings(_env_file=None).assistant_api_key == "sk-wlasny"  # własna nazwa ma pierwszeństwo
