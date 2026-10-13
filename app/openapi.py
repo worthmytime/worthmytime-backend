@@ -591,7 +591,7 @@ OPERATIONS: list[dict] = [
     _op("POST", "/assistant/chat", "assistant_chat", "Asystent AI", "Odpowiedź asystenta na rozmowę",
         (200, "Odpowiedź modelu", "AssistantReply"), body=s.AssistantChatIn,
         description="Do 30 wiadomości po 2000 znaków; ostatnia musi być od użytkownika. Serwer dokłada aktualne dane miesiąca "
-        "i woła model z `ASSISTANT_MODEL` przez API zgodne z OpenAI (`ASSISTANT_BASE_URL`). Rozmowa nie jest zapisywana.",
+        "i woła model z `ASSISTANT_MODEL` przez oficjalną bibliotekę OpenAI (Responses API). Rozmowa nie jest zapisywana.",
         extra={409: "Brak dochodu lub stawki w profilu", 502: "Model nie odpowiedział",
                503: "Asystent nie jest skonfigurowany (`ASSISTANT_API_KEY`, `ASSISTANT_MODEL`)"}),
 ]

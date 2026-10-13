@@ -1,16 +1,16 @@
-"""Asystent AI: kontekst miesiąca dla modelu językowego i wywołanie API zgodnego z OpenAI Chat Completions.
+"""Asystent AI: kontekst miesiąca dla modelu językowego i wywołanie OpenAI przez oficjalną bibliotekę `openai`.
 
-Klucz, adres i nazwa modelu są w konfiguracji backendu (`ASSISTANT_*`); frontend rozmawia wyłącznie z naszym API.
-Budowanie kontekstu to czyste funkcje (łatwe do testów); wywołanie HTTP jest w `_post` i `chat`.
+Klucz i nazwa modelu są w konfiguracji backendu (`ASSISTANT_API_KEY` albo `OPENAI_API_KEY`, `ASSISTANT_MODEL`);
+frontend rozmawia wyłącznie z naszym API. Budowanie kontekstu to czyste funkcje (łatwe do testów);
+wywołanie modelu jest w `_ask`, a zamiana błędów na odpowiedzi API w `chat`.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import urllib.request
 from datetime import date
+
+import openai
 
 from .budget import BudgetPlan
 from .config import settings
@@ -110,44 +110,40 @@ def build_context(
     return lines
 
 
-def chat_messages(context: list[str], history: list[dict]) -> list[dict]:
-    """Wiadomości dla modelu: instrukcja z danymi użytkownika, a po niej rozmowa."""
-    system = SYSTEM_PROMPT + "\n\nDane użytkownika:\n" + "\n".join(f"- {line}" for line in context)
-    return [{"role": "system", "content": system}, *({"role": m["role"], "content": m["content"]} for m in history)]
+def instructions(context: list[str]) -> str:
+    """Instrukcja dla modelu razem z danymi użytkownika z bieżącego miesiąca."""
+    return SYSTEM_PROMPT + "\n\nDane użytkownika:\n" + "\n".join(f"- {line}" for line in context)
 
 
 def configured() -> bool:
     return bool(settings.assistant_api_key and settings.assistant_model)
 
 
-def _post(payload: dict) -> dict:
-    request = urllib.request.Request(
-        f"{settings.assistant_base_url.rstrip('/')}/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {settings.assistant_api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "worthmytime-backend",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=settings.assistant_timeout_seconds) as response:
-        return json.loads(response.read())
+async def _ask(system: str, history: list[dict]) -> str:
+    """Jedno wywołanie Responses API: instrukcja z danymi użytkownika i dotychczasowa rozmowa."""
+    async with openai.AsyncOpenAI(
+        api_key=settings.assistant_api_key,
+        timeout=settings.assistant_timeout_seconds,
+        max_retries=1,
+    ) as client:
+        response = await client.responses.create(
+            model=settings.assistant_model,
+            instructions=system,
+            input=[{"role": m["role"], "content": m["content"]} for m in history],
+            store=False,  # dane finansowe użytkownika nie mają zostawać w historii odpowiedzi u dostawcy
+        )
+    return response.output_text
 
 
-async def chat(messages: list[dict]) -> str:
+async def chat(context: list[str], history: list[dict]) -> str:
     """Odpowiedź modelu na rozmowę; 503 bez konfiguracji na serwerze, 502 gdy model nie odpowie."""
     if not configured():
         raise ApiError("Asystent AI nie jest skonfigurowany na serwerze", 503)
-    # tylko model i wiadomości: parametry takie jak limit tokenów różnią się między modelami i dostawcami
-    payload = {"model": settings.assistant_model, "messages": messages}
     try:
-        data = await asyncio.to_thread(_post, payload)  # urllib blokuje, więc poza pętlą zdarzeń
-        reply = data["choices"][0]["message"]["content"]
-    except (OSError, ValueError, KeyError, IndexError, TypeError) as e:
-        # w logu sam rodzaj błędu: treść rozmowy to dane użytkownika, a nagłówek zawiera klucz
-        log.warning("Asystent AI nie odpowiedział: %s", type(e).__name__)
+        reply = await _ask(instructions(context), history)
+    except openai.OpenAIError as e:
+        # w logu rodzaj błędu i kod odpowiedzi: treść rozmowy to dane użytkownika, a żądanie zawiera klucz
+        log.warning("Asystent AI nie odpowiedział: %s (status %s)", type(e).__name__, getattr(e, "status_code", "-"))
         raise ApiError("Asystent nie odpowiedział, spróbuj ponownie za chwilę", 502) from None
     if not isinstance(reply, str) or not reply.strip():
         raise ApiError("Asystent zwrócił pustą odpowiedź, spróbuj ponownie", 502)

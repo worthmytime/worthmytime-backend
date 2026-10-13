@@ -94,5 +94,5 @@ async def assistant_chat(request: Request):
     if wait:
         raise ApiError("Zbyt wiele wiadomości, spróbuj ponownie za chwilę", 429, headers={"Retry-After": str(wait)})
     context = await _context(request, request.ctx.user)
-    reply = await assistant.chat(assistant.chat_messages(context, [m.model_dump() for m in data.messages]))
+    reply = await assistant.chat(context, [m.model_dump() for m in data.messages])
     return ok({"reply": reply})
